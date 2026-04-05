@@ -1,0 +1,6 @@
+# Add this block to your Caddyfile.
+# If Cloudflare Tunnel handles TLS, keep auto_https off in the global block.
+
+http://tipsplit.yourdomain.com {
+    reverse_proxy localhost:4000
+}

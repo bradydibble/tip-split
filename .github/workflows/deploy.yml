@@ -1,0 +1,52 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to server
+        env:
+          DEPLOY_KEY:  ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          ENV_FILE:    ${{ secrets.ENV_FILE }}
+        run: |
+          # Write deploy key
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          # Trust the host (Tailscale IP, no DNS)
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+          # Write .env and deploy on server
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" bash << 'ENDSSH'
+            set -e
+            cd ~/claudecode/tipsplit
+            git pull
+            printf '%s' "$ENV_FILE" > .env
+            podman build -t tipsplit:latest .
+            systemctl --user restart tipsplit.service
+            echo "Deploy complete."
+          ENDSSH

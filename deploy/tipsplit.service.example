@@ -1,0 +1,25 @@
+# Rootless Podman systemd user service for TipSplit
+# Install to: ~/.config/systemd/user/tipsplit.service
+# Enable:     systemctl --user enable --now tipsplit.service
+
+[Unit]
+Description=TipSplit App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+
+ExecStart=/usr/bin/podman run --rm --name tipsplit \
+  -p 4000:3000 \
+  -v tipsplit-data:/app/data \
+  --env-file %h/claudecode/tipsplit/.env \
+  localhost/tipsplit:latest
+
+ExecStop=/usr/bin/podman stop -t 10 tipsplit
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
