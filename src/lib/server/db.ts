@@ -14,12 +14,12 @@ db.pragma('foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    pin_hash   TEXT    NOT NULL,
-    role       TEXT    NOT NULL DEFAULT 'shift_lead'
-                       CHECK (role IN ('shift_lead', 'manager')),
-    location_id INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    pin_hash    TEXT    NOT NULL,
+    role        TEXT    NOT NULL DEFAULT 'shift_lead'
+                        CHECK (role IN ('shift_lead', 'manager')),
+    location_id INTEGER NOT NULL DEFAULT 1 CHECK (location_id = 1),
+    created_at  INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
   CREATE TABLE IF NOT EXISTS staff (
@@ -27,7 +27,7 @@ db.exec(`
     name                  TEXT    NOT NULL,
     role                  TEXT    NOT NULL CHECK (role IN ('FOH', 'Kitchen', 'Bar')),
     active                INTEGER NOT NULL DEFAULT 1,
-    location_id           INTEGER NOT NULL DEFAULT 1,
+    location_id           INTEGER NOT NULL DEFAULT 1 CHECK (location_id = 1),
     source                TEXT    NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'square')),
     square_team_member_id TEXT    UNIQUE
   );
@@ -41,46 +41,46 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS tip_calculations (
-    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-    date                      TEXT    NOT NULL,
-    shift                     TEXT    NOT NULL CHECK (shift IN ('Lunch', 'Dinner')),
-    gross_tips_cents          INTEGER NOT NULL,
-    liquor_sales_cents        INTEGER NOT NULL,
-    cc_fee_rate               REAL    NOT NULL,
-    kitchen_pct               REAL    NOT NULL,
-    bar_liquor_pct            REAL    NOT NULL,
-    cc_fees_cents             INTEGER NOT NULL,
-    tips_after_fees_cents     INTEGER NOT NULL,
-    kitchen_pool_cents        INTEGER NOT NULL,
-    bar_pool_cents            INTEGER NOT NULL,
-    foh_pool_cents            INTEGER NOT NULL,
-    location_id               INTEGER NOT NULL DEFAULT 1,
-    created_at                INTEGER NOT NULL DEFAULT (unixepoch())
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    date                  TEXT    NOT NULL,
+    shift                 TEXT    NOT NULL CHECK (shift IN ('Lunch', 'Dinner')),
+    gross_tips_cents      INTEGER NOT NULL,
+    liquor_sales_cents    INTEGER NOT NULL,
+    cc_fee_rate           REAL    NOT NULL,
+    kitchen_pct           REAL    NOT NULL,
+    bar_liquor_pct        REAL    NOT NULL,
+    cc_fees_cents         INTEGER NOT NULL,
+    tips_after_fees_cents INTEGER NOT NULL,
+    kitchen_pool_cents    INTEGER NOT NULL,
+    bar_pool_cents        INTEGER NOT NULL,
+    foh_pool_cents        INTEGER NOT NULL,
+    location_id           INTEGER NOT NULL DEFAULT 1 CHECK (location_id = 1),
+    created_at            INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
   CREATE TABLE IF NOT EXISTS tip_distributions (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    calculation_id      INTEGER NOT NULL REFERENCES tip_calculations(id) ON DELETE CASCADE,
-    staff_id            INTEGER,
-    name                TEXT    NOT NULL,
-    role                TEXT    NOT NULL,
-    foh_share_cents     INTEGER NOT NULL DEFAULT 0,
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    calculation_id       INTEGER NOT NULL REFERENCES tip_calculations(id) ON DELETE CASCADE,
+    staff_id             INTEGER,
+    name                 TEXT    NOT NULL,
+    role                 TEXT    NOT NULL,
+    foh_share_cents      INTEGER NOT NULL DEFAULT 0,
     bar_pool_share_cents INTEGER NOT NULL DEFAULT 0,
-    kitchen_share_cents INTEGER NOT NULL DEFAULT 0,
-    total_cents         INTEGER NOT NULL
+    kitchen_share_cents  INTEGER NOT NULL DEFAULT 0,
+    total_cents          INTEGER NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS settings (
     key         TEXT    NOT NULL,
     value       TEXT    NOT NULL,
-    location_id INTEGER NOT NULL DEFAULT 1,
+    location_id INTEGER NOT NULL DEFAULT 1 CHECK (location_id = 1),
     PRIMARY KEY (key, location_id)
   );
 
   CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT    PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at INTEGER NOT NULL
+    expires_at TEXT    NOT NULL  -- ISO8601 e.g. '2026-04-06T22:00:00.000Z'
   );
 `);
 
@@ -116,7 +116,7 @@ const initialPin = process.env.INITIAL_MANAGER_PIN;
 if (initialPin) {
   const count = (db.prepare('SELECT COUNT(*) as n FROM users').get() as { n: number }).n;
   if (count === 0) {
-    const hash = bcrypt.hashSync(initialPin, 12);
+    const hash = bcrypt.hashSync(initialPin, 10);
     db.prepare("INSERT INTO users (pin_hash, role) VALUES (?, 'manager')").run(hash);
     console.log('[tipsplit] Initial manager account created.');
   }

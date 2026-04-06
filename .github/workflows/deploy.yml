@@ -24,28 +24,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to server
-        env:
-          DEPLOY_KEY:  ${{ secrets.DEPLOY_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          ENV_FILE:    ${{ secrets.ENV_FILE }}
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Write SSH key
         run: |
-          # Write deploy key
           mkdir -p ~/.ssh
-          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
-          # Trust the host (Tailscale IP, no DNS)
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+      - name: Copy .env to VM
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          echo "$ENV_FILE" > /tmp/tipsplit.env
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            /tmp/tipsplit.env \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/claudecode/tipsplit/.env
+          rm /tmp/tipsplit.env
 
-          # Write .env and deploy on server
+      - name: Deploy on VM
+        run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-              "${DEPLOY_USER}@${DEPLOY_HOST}" bash << 'ENDSSH'
+              ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} bash << 'ENDSSH'
             set -e
             cd ~/claudecode/tipsplit
             git pull
-            printf '%s' "$ENV_FILE" > .env
             podman build -t tipsplit:latest .
             systemctl --user restart tipsplit.service
             echo "Deploy complete."
