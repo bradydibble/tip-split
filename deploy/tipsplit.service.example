@@ -15,7 +15,7 @@ RestartSec=10
 ExecStart=/usr/bin/podman run --rm --name tipsplit \
   -p 4000:3000 \
   -v tipsplit-data:/app/data \
-  --env-file %h/claudecode/tipsplit/.env \
+  --env-file %h/tipsplit/.env \
   localhost/tipsplit:latest
 
 ExecStop=/usr/bin/podman stop -t 10 tipsplit

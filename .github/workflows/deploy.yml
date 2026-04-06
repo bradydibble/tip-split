@@ -42,7 +42,7 @@ jobs:
           echo "$ENV_FILE" > /tmp/tipsplit.env
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             /tmp/tipsplit.env \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/claudecode/tipsplit/.env
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:~/tipsplit/.env
           rm /tmp/tipsplit.env
 
       - name: Deploy on VM
@@ -50,7 +50,7 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
               ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} bash << 'ENDSSH'
             set -e
-            cd ~/claudecode/tipsplit
+            cd ~/tipsplit
             git pull
             podman build -t tipsplit:latest .
             systemctl --user restart tipsplit.service
