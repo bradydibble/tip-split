@@ -17,7 +17,7 @@
         body: JSON.stringify({ calculationId: data.calc.id }),
       });
       const json = await res.json();
-      exportMsg = res.ok ? '✓ Exported to Google Sheets' : `Error: ${json.error}`;
+      exportMsg = res.ok ? '✓ Exported to Google Sheets' : `Error: ${json.message}`;
     } catch {
       exportMsg = 'Export failed — check Sheets config in Settings';
     }
