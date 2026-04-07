@@ -12,20 +12,37 @@ async function getToken(credJson: string): Promise<string> {
   return token;
 }
 
+async function sheetIsEmpty(
+  spreadsheetId: string,
+  range: string,
+  token: string
+): Promise<boolean> {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) return true; // treat unreadable as empty; append will surface real errors
+  const body = await res.json();
+  return !body.values || body.values.length === 0;
+}
+
 /**
- * Append rows to a Google Sheet.
- * Values are plain strings/numbers; Sheets will auto-detect dates and numbers.
+ * Append a data row to a Google Sheet.
+ * Writes the header row first only when the sheet is empty.
  */
 export async function appendToSheet(
   spreadsheetId: string,
   sheetName: string,
-  values: (string | number)[][],
+  headerRow: (string | number)[],
+  dataRow: (string | number)[],
   credJson: string
 ): Promise<void> {
   const token = await getToken(credJson);
   const range = encodeURIComponent(`'${sheetName}'!A1`);
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+  const base = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
 
+  const empty = await sheetIsEmpty(spreadsheetId, range, token);
+  const values = empty ? [headerRow, dataRow] : [dataRow];
+
+  const url = `${base}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
   const res = await fetch(url, {
     method: 'POST',
     headers: {
