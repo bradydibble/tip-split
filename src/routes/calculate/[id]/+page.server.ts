@@ -4,7 +4,6 @@ import db from '$lib/server/db';
 import type { CalcRow, DistRow } from '$lib/server/db';
 import { getSettings } from '$lib/server/auth';
 import { appendToSheet } from '$lib/server/sheets';
-import { formatCents } from '$lib/calculator';
 
 export const load: PageServerLoad = ({ locals, params }) => {
   if (!locals.user) redirect(303, '/');
