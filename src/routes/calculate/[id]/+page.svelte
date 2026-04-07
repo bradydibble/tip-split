@@ -60,7 +60,7 @@
     <!-- Per-person -->
     {#if fohDists.length > 0}
       <div class="card">
-        <p class="label">FOH — ${formatCents(c.foh_pool_cents)} ÷ {fohDists.length}</p>
+        <p class="label">FOH — ${formatCents(c.foh_pool_cents)} ÷ {fohDists.length + barDists.length}</p>
         {#each fohDists as d}
           <div class="row"><span>{d.name}</span><span class="money amt">${formatCents(d.total_cents)}</span></div>
         {/each}

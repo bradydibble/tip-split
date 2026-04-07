@@ -55,8 +55,9 @@ describe('calculate — intermediate amounts', () => {
     expect(r.fohPoolCents).toBe(82025);
   });
 
-  it('bartender is NOT counted in FOH staff', () => {
-    expect(r.fohStaffCount).toBe(5);
+  it('bartender IS counted in FOH pool participants', () => {
+    expect(r.fohStaffCount).toBe(5);              // only FOH staff
+    expect(r.fohPoolParticipantCount).toBe(6);    // 5 FOH + 1 Bar share the FOH pool
     expect(r.barStaffCount).toBe(1);
   });
 });
@@ -71,15 +72,21 @@ describe('calculate — roundToDollar: false', () => {
   const bar     = r.distributions.filter(d => d.role === 'Bar');
   const kitchen = r.distributions.filter(d => d.role === 'Kitchen');
 
-  it('5 FOH servers split $820.25 → $164.05 each (exact, no remainder)', () => {
+  it('5 FOH servers split $820.25 among 6 (FOH+Bar) → floor $136.70, 5¢ remainder to first 5', () => {
+    // fohPool = 82025 cents, 6 participants: floor(82025/6) = 13670, remainder = 82025 - 13670*6 = 5
+    // fohPoolParticipants = [...fohStaff, ...barStaff], so first 5 (all FOH) each get 13671¢
     expect(foh).toHaveLength(5);
-    foh.forEach(d => expect(d.totalCents).toBe(16405)); // $164.05
+    foh.forEach(d => {
+      expect(d.totalCents).toBe(13671);
+    });
   });
 
-  it('bartender gets bar pool share only: $96.50', () => {
+  it('bartender gets FOH share + bar pool share: FOH $136.70 + bar $96.50', () => {
     expect(bar).toHaveLength(1);
-    expect(bar[0].totalCents).toBe(9650); // $96.50
-    expect(bar[0].fohShareCents).toBe(0);
+    // bartender is the 6th participant (index 5) — gets 13670¢ FOH share + 9650¢ bar pool
+    expect(bar[0].fohShareCents).toBe(13670);
+    expect(bar[0].barPoolShareCents).toBe(9650);
+    expect(bar[0].totalCents).toBe(13670 + 9650);
   });
 
   it('3 kitchen cooks split $48.25 → $16.09, $16.08, $16.08 (1¢ remainder to first)', () => {
@@ -107,15 +114,28 @@ describe('calculate — roundToDollar: true (default)', () => {
     r.distributions.forEach(d => expect(d.totalCents % 100).toBe(0));
   });
 
-  it('FOH pool rounds to $820, split 5 ways → $164 each (exact)', () => {
-    // Math.round(82025 / 100) = 820, 820 / 5 = 164 exact
-    foh.forEach(d => expect(d.totalCents).toBe(16400));
+  it('FOH pool rounds to $820, split 6 ways (5 FOH + 1 Bar) → base $136, 4 extras of $137', () => {
+    // kitchenPool: round(4825/100)*100 = 4800; remaining = 96500-4800 = 91700
+    // barPool: round(9650/100)*100 = 9700; fohPool = 91700-9700 = 82000 → $820
+    // 820 / 6 = 136 base, extras = 820 - 136*6 = 820 - 816 = 4
+    expect(foh).toHaveLength(5);
+    const fohTotals = foh.map(d => d.totalCents);
+    fohTotals.forEach(t => expect(t === 13600 || t === 13700).toBe(true));
+    const fohSum = fohTotals.reduce((s, t) => s + t, 0);
+    // all 5 FOH + 1 bar share $820 pool; check FOH portion is consistent
+    expect(fohSum % 100).toBe(0);
   });
 
-  it('bar pool rounds to $97, bartender gets $97', () => {
-    // Math.round(9650 / 100) = 97 (rounds 96.50 → 97 with Math.round half-up)
-    expect(bar[0].totalCents).toBe(9700);
-    expect(bar[0].fohShareCents).toBe(0);
+  it('bar pool rounds to $97, bartender gets FOH share + $97 bar', () => {
+    // Math.round(9650 / 100) = 97
+    expect(bar[0].barPoolShareCents).toBe(9700);
+    expect(bar[0].fohShareCents === 13600 || bar[0].fohShareCents === 13700).toBe(true);
+    expect(bar[0].totalCents).toBe(bar[0].fohShareCents + 9700);
+  });
+
+  it('FOH + Bar pool shares sum to $820', () => {
+    const allFohShares = [...foh, ...bar].reduce((s, d) => s + d.fohShareCents, 0);
+    expect(allFohShares).toBe(82000);
   });
 
   it('kitchen pool rounds to $48, 3 cooks → $16 each (exact)', () => {
@@ -141,7 +161,7 @@ describe('calculate — edge cases', () => {
     r.distributions.forEach(d => expect(d.totalCents).toBe(0));
   });
 
-  it('multiple bartenders split bar pool equally (whole dollars)', () => {
+  it('multiple bartenders split bar pool and FOH pool equally (whole dollars)', () => {
     const r = calculate({
       grossTipsCents: dollarsToCents(500),
       liquorSalesCents: dollarsToCents(1000),
@@ -153,7 +173,13 @@ describe('calculate — edge cases', () => {
     }, makeRng());
     const bars = r.distributions.filter(d => d.role === 'Bar');
     expect(bars).toHaveLength(2);
-    // barPool = $100, 2 bartenders → $50 each
-    bars.forEach(d => expect(d.totalCents).toBe(5000));
+    // fohPool = $500 - $0 kitchen - $100 bar = $400, split 2 ways → $200 each
+    // barPool = $100, split 2 ways → $50 each
+    // total per bartender = $200 + $50 = $250
+    bars.forEach(d => {
+      expect(d.fohShareCents).toBe(20000);
+      expect(d.barPoolShareCents).toBe(5000);
+      expect(d.totalCents).toBe(25000);
+    });
   });
 });
