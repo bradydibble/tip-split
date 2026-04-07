@@ -8,7 +8,7 @@ export const load: PageServerLoad = ({ locals }) => {
   if (!locals.user) redirect(303, '/');
   if (locals.user.role !== 'manager') redirect(303, '/calculate');
 
-  const users = db.prepare('SELECT id, role, created_at FROM users ORDER BY id').all() as Pick<UserRow, 'id' | 'role'>[];
+  const users = db.prepare('SELECT id, name, role FROM users ORDER BY id').all() as Pick<UserRow, 'id' | 'name' | 'role'>[];
   return { users, currentUserId: locals.user.id };
 };
 
@@ -17,21 +17,19 @@ export const actions: Actions = {
     if (!locals.user || locals.user.role !== 'manager') return fail(403);
 
     const fd = await request.formData();
+    const name = String(fd.get('name') ?? '').trim();
     const pin  = String(fd.get('pin')  ?? '').trim();
     const role = String(fd.get('role') ?? '');
 
-    if (!/^\d{4,6}$/.test(pin)) {
-      return fail(400, { addError: 'PIN must be 4–6 digits' });
-    }
-    if (!['shift_lead', 'manager'].includes(role)) {
-      return fail(400, { addError: 'Invalid role' });
-    }
+    if (!name) return fail(400, { addError: 'Name is required' });
+    if (!/^\d{4,6}$/.test(pin)) return fail(400, { addError: 'PIN must be 4–6 digits' });
+    if (!['shift_lead', 'manager'].includes(role)) return fail(400, { addError: 'Invalid role' });
 
     const existing = await findUserByPin(pin);
     if (existing) return fail(400, { addError: 'That PIN is already in use' });
 
     const hash = await hashPin(pin);
-    db.prepare('INSERT INTO users (pin_hash, role) VALUES (?, ?)').run(hash, role);
+    db.prepare('INSERT INTO users (name, pin_hash, role) VALUES (?, ?, ?)').run(name, hash, role);
     return {};
   },
 

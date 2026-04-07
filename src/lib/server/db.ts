@@ -88,6 +88,8 @@ db.exec(`
 for (const sql of [
   "ALTER TABLE staff ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'",
   "ALTER TABLE staff ADD COLUMN square_team_member_id TEXT",
+  "ALTER TABLE users ADD COLUMN name TEXT",
+  "ALTER TABLE tip_calculations ADD COLUMN voided INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(sql); } catch { /* column already exists */ }
 }
@@ -124,6 +126,7 @@ if (initialPin) {
 
 export type UserRow = {
   id: number;
+  name: string | null;
   pin_hash: string;
   role: 'shift_lead' | 'manager';
   location_id: number;
@@ -153,6 +156,7 @@ export type CalcRow = {
   kitchen_pool_cents: number;
   bar_pool_cents: number;
   foh_pool_cents: number;
+  voided: number;
   created_at: number;
 };
 

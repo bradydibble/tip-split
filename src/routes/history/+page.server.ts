@@ -15,7 +15,7 @@ export const load: PageServerLoad = ({ locals }) => {
     LIMIT 90
   `).all() as Array<{
     id: number; date: string; shift: string;
-    tips_after_fees_cents: number; staff_count: number;
+    tips_after_fees_cents: number; staff_count: number; voided: number;
   }>;
 
   return { calcs };
