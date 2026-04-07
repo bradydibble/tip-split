@@ -23,7 +23,7 @@ export async function appendToSheet(
   credJson: string
 ): Promise<void> {
   const token = await getToken(credJson);
-  const range = encodeURIComponent(sheetName);
+  const range = encodeURIComponent(`'${sheetName}'`);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
 
   const res = await fetch(url, {
