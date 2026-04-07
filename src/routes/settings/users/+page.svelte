@@ -5,6 +5,7 @@
   let { data, form }: { data: PageData; form: ActionData } = $props();
   let adding = $state(false);
   let newPin = $state('');
+  let newName = $state('');
   let newRole: 'shift_lead' | 'manager' = $state('shift_lead');
 </script>
 
@@ -26,18 +27,20 @@
       <p class="label">Add User</p>
       <form method="POST" action="?/add" use:enhance={() => {
         adding = true;
-        return ({ update }) => { adding = false; newPin = ''; update(); };
+        return ({ update }) => { adding = false; newPin = ''; newName = ''; update(); };
       }}>
-        <div style="display:grid;grid-template-columns:1fr auto;gap:0.75rem;margin-bottom:0.75rem;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:0.75rem;">
+          <input class="input" type="text" name="name" bind:value={newName}
+            placeholder="Name" required />
           <input class="input" type="text" inputmode="numeric"
             name="pin" bind:value={newPin} placeholder="4–6 digit PIN" required />
-          <select class="input" name="role" bind:value={newRole} style="width:auto;padding-right:2rem;">
-            <option value="shift_lead">Shift Lead</option>
-            <option value="manager">Manager</option>
-          </select>
         </div>
+        <select class="input" name="role" bind:value={newRole} style="margin-bottom:0.75rem;">
+          <option value="shift_lead">Shift Lead</option>
+          <option value="manager">Manager</option>
+        </select>
         {#if form && 'addError' in form}<p class="error-msg">{(form as {addError: string}).addError}</p>{/if}
-        <button type="submit" class="btn btn-primary" disabled={adding || newPin.length < 4}>
+        <button type="submit" class="btn btn-primary" disabled={adding || newPin.length < 4 || !newName.trim()}>
           {adding ? 'Adding…' : 'Add User'}
         </button>
       </form>
@@ -50,7 +53,7 @@
         <div style="display:flex;justify-content:space-between;align-items:center;
                     padding:0.6rem 0;border-bottom:1px solid var(--border);">
           <div>
-            <span style="font-weight:500;">User #{user.id}</span>
+            <span style="font-weight:500;">{user.name ?? 'Unnamed'}</span>
             <span style="font-size:0.75rem;color:var(--muted);margin-left:0.5rem;">
               {user.role === 'manager' ? 'Manager' : 'Shift Lead'}
             </span>

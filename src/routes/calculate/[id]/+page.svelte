@@ -94,14 +94,26 @@
 
     <!-- Actions -->
     <div style="display:flex;flex-direction:column;gap:0.75rem;">
-      <a href="/calculate/{c.id}/share" class="btn btn-primary">Share Card</a>
-      <button class="btn btn-secondary" onclick={exportToSheets} disabled={exporting}>
-        {exporting ? 'Exporting…' : 'Export to Google Sheets'}
-      </button>
-      {#if exportMsg}
-        <p class:success-msg={exportMsg.startsWith('✓')} class:error-msg={!exportMsg.startsWith('✓')}>
-          {exportMsg}
-        </p>
+      {#if c.voided}
+        <div class="card" style="text-align:center;padding:1rem;border:1.5px solid var(--danger);">
+          <p style="color:var(--danger);font-weight:600;">This calculation has been voided</p>
+        </div>
+      {:else}
+        <a href="/calculate/{c.id}/share" class="btn btn-primary">Share Card</a>
+        <button class="btn btn-secondary" onclick={exportToSheets} disabled={exporting}>
+          {exporting ? 'Exporting…' : 'Export to Google Sheets'}
+        </button>
+        {#if exportMsg}
+          <p class:success-msg={exportMsg.startsWith('✓')} class:error-msg={!exportMsg.startsWith('✓')}>
+            {exportMsg}
+          </p>
+        {/if}
+        <form method="POST" action="?/void">
+          <button type="submit" class="btn btn-danger"
+            onclick={e => { if (!confirm('Void this calculation? A VOID row will be added to Google Sheets.')) e.preventDefault(); }}>
+            Void Calculation
+          </button>
+        </form>
       {/if}
       <a href="/calculate" class="btn btn-secondary">New Calculation</a>
     </div>
