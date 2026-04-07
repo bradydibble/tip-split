@@ -52,7 +52,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     await appendToSheet(
       spreadsheetId,
       settings.google_sheets_sheet_name || 'Tip History',
-      [headerRow, dataRow],
+      headerRow,
+      dataRow,
       credJson
     );
   } catch (e) {
