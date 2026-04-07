@@ -56,7 +56,8 @@ describe('calculate — intermediate amounts', () => {
   });
 
   it('bartender IS counted in FOH pool participants', () => {
-    expect(r.fohStaffCount).toBe(6); // 5 FOH + 1 Bar share the FOH pool
+    expect(r.fohStaffCount).toBe(5);              // only FOH staff
+    expect(r.fohPoolParticipantCount).toBe(6);    // 5 FOH + 1 Bar share the FOH pool
     expect(r.barStaffCount).toBe(1);
   });
 });
@@ -71,21 +72,21 @@ describe('calculate — roundToDollar: false', () => {
   const bar     = r.distributions.filter(d => d.role === 'Bar');
   const kitchen = r.distributions.filter(d => d.role === 'Kitchen');
 
-  it('5 FOH servers split $820.25 among 6 (FOH+Bar) → $136.70 each (floor $136, 5¢ remainder to first 5)', () => {
+  it('5 FOH servers split $820.25 among 6 (FOH+Bar) → floor $136.70, 5¢ remainder to first 5', () => {
     // fohPool = 82025 cents, 6 participants: floor(82025/6) = 13670, remainder = 82025 - 13670*6 = 5
-    // first 5 get 13671, last gets 13670
+    // fohPoolParticipants = [...fohStaff, ...barStaff], so first 5 (all FOH) each get 13671¢
     expect(foh).toHaveLength(5);
     foh.forEach(d => {
-      expect(d.totalCents === 13671 || d.totalCents === 13670).toBe(true);
+      expect(d.totalCents).toBe(13671);
     });
   });
 
-  it('bartender gets FOH share + bar pool share: FOH $136.70ish + bar $96.50', () => {
+  it('bartender gets FOH share + bar pool share: FOH $136.70 + bar $96.50', () => {
     expect(bar).toHaveLength(1);
-    // bartender gets the 6th FOH share (13670 or 13671) + bar pool 9650
-    expect(bar[0].fohShareCents === 13671 || bar[0].fohShareCents === 13670).toBe(true);
+    // bartender is the 6th participant (index 5) — gets 13670¢ FOH share + 9650¢ bar pool
+    expect(bar[0].fohShareCents).toBe(13670);
     expect(bar[0].barPoolShareCents).toBe(9650);
-    expect(bar[0].totalCents).toBe(bar[0].fohShareCents + 9650);
+    expect(bar[0].totalCents).toBe(13670 + 9650);
   });
 
   it('3 kitchen cooks split $48.25 → $16.09, $16.08, $16.08 (1¢ remainder to first)', () => {

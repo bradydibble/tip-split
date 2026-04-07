@@ -24,7 +24,7 @@ export interface Distribution {
   staffId: number;
   name: string;
   role: StaffRole;
-  fohShareCents: number;       // 0 for Bar and Kitchen
+  fohShareCents: number;       // 0 for Kitchen; Bar staff also receive a FOH share (they participate in the FOH pool)
   barPoolShareCents: number;   // 0 for FOH and Kitchen
   kitchenShareCents: number;   // 0 for FOH and Bar
   totalCents: number;
@@ -40,6 +40,7 @@ export interface CalculationResult {
   barPoolCents: number;
   fohPoolCents: number;
   fohStaffCount: number;
+  fohPoolParticipantCount: number;
   kitchenStaffCount: number;
   barStaffCount: number;
   distributions: Distribution[];
