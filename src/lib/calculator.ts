@@ -167,7 +167,8 @@ export function calculate(input: CalculatorInput, rng: () => number = Math.rando
   return {
     grossTipsCents, ccFeesCents, tipsAfterFeesCents, kitchenPoolCents,
     remainingAfterKitchenCents, liquorSalesCents, barPoolCents, fohPoolCents,
-    fohStaffCount: fohPoolParticipants.length, kitchenStaffCount: kitchenStaff.length, barStaffCount: barStaff.length,
+    fohStaffCount: fohStaff.length, fohPoolParticipantCount: fohPoolParticipants.length,
+    kitchenStaffCount: kitchenStaff.length, barStaffCount: barStaff.length,
     distributions, config,
   };
 }
