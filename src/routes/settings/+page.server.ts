@@ -16,10 +16,24 @@ export const actions: Actions = {
     }
 
     const fd = await request.formData();
+
+    const ccFeeRate   = parseFloat(String(fd.get('cc_fee_rate')   ?? ''));
+    const kitchenPct  = parseFloat(String(fd.get('kitchen_pct')   ?? ''));
+    const barLiquorPct = parseFloat(String(fd.get('bar_liquor_pct') ?? ''));
+
+    if (isNaN(ccFeeRate)    || ccFeeRate    < 0 || ccFeeRate    > 100)
+      return fail(400, { error: 'CC fee rate must be between 0 and 100' });
+    if (isNaN(kitchenPct)   || kitchenPct   < 0 || kitchenPct   > 100)
+      return fail(400, { error: 'Kitchen % must be between 0 and 100' });
+    if (isNaN(barLiquorPct) || barLiquorPct < 0 || barLiquorPct > 100)
+      return fail(400, { error: 'Bar liquor % must be between 0 and 100' });
+    if (kitchenPct + barLiquorPct > 100)
+      return fail(400, { error: 'Kitchen % and bar liquor % cannot exceed 100% combined' });
+
     const updates: [string, string][] = [
-      ['cc_fee_rate',                  String(fd.get('cc_fee_rate') ?? '')],
-      ['kitchen_pct',                  String(fd.get('kitchen_pct') ?? '')],
-      ['bar_liquor_pct',               String(fd.get('bar_liquor_pct') ?? '')],
+      ['cc_fee_rate',                  String(ccFeeRate)],
+      ['kitchen_pct',                  String(kitchenPct)],
+      ['bar_liquor_pct',               String(barLiquorPct)],
       ['lunch_cutoff',                 String(fd.get('lunch_cutoff') ?? '15:00')],
       ['restaurant_name',              String(fd.get('restaurant_name') ?? '')],
       ['google_sheets_spreadsheet_id', String(fd.get('google_sheets_spreadsheet_id') ?? '')],
