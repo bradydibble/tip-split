@@ -150,6 +150,8 @@
                 included = new Set([...included, newPerson.id]);
                 newName = '';
                 showAddForm = false;
+              } else if (result.type === 'failure') {
+                addError = String(result.data?.addError ?? 'Failed to add staff member');
               } else {
                 await update();
               }

@@ -93,6 +93,9 @@
                   Change
                 </button>
               </form>
+              {#if form && 'roleError' in form}
+                <p class="error-msg" style="font-size:0.75rem;margin-top:0.25rem;">{(form as {roleError: string}).roleError}</p>
+              {/if}
             </div>
           {/each}
         </div>
