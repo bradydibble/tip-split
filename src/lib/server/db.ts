@@ -82,6 +82,14 @@ db.exec(`
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TEXT    NOT NULL  -- ISO8601 e.g. '2026-04-06T22:00:00.000Z'
   );
+
+  CREATE TABLE IF NOT EXISTS export_log (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    calculation_id INTEGER NOT NULL REFERENCES tip_calculations(id) ON DELETE CASCADE,
+    exported_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+    exported_by    INTEGER REFERENCES users(id),
+    location_id    INTEGER NOT NULL DEFAULT 1 CHECK (location_id = 1)
+  );
 `);
 
 // Migrations for columns added after initial schema
@@ -170,6 +178,14 @@ export type DistRow = {
   bar_pool_share_cents: number;
   kitchen_share_cents: number;
   total_cents: number;
+};
+
+export type ExportLogRow = {
+  id: number;
+  calculation_id: number;
+  exported_at: number;
+  exported_by: number | null;
+  location_id: number;
 };
 
 export default db;

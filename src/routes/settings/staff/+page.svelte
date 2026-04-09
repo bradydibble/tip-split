@@ -6,6 +6,11 @@
   let adding = $state(false);
   let newName = $state('');
   let newRole = $state<'FOH' | 'Kitchen' | 'Bar'>('FOH');
+
+  // Detect names shared by multiple staff to show ID badges
+  const nameCounts = $derived(
+    data.staff.reduce((acc, s) => { acc[s.name] = (acc[s.name] ?? 0) + 1; return acc; }, {} as Record<string, number>)
+  );
 </script>
 
 <div class="page" style="padding-top:0;">
@@ -47,24 +52,50 @@
         <div class="card">
           <p class="label">{label}</p>
           {#each group as person}
-            <div style="display:flex;justify-content:space-between;align-items:center;
-                        padding:0.6rem 0;border-bottom:1px solid var(--border);">
-              <span style="font-size:1rem;{!person.active ? 'color:var(--muted);text-decoration:line-through;' : ''}">{person.name}</span>
-              <div style="display:flex;gap:0.5rem;">
-                <form method="POST" action="?/toggle" use:enhance>
-                  <input type="hidden" name="id" value={person.id} />
-                  <button type="submit" style="background:none;font-size:0.75rem;
-                    color:{person.active ? 'var(--muted)' : 'var(--success)'};">
-                    {person.active ? 'Deactivate' : 'Activate'}
-                  </button>
-                </form>
-                <form method="POST" action="?/remove" use:enhance>
-                  <input type="hidden" name="id" value={person.id} />
-                  <button type="submit" style="background:none;font-size:0.75rem;color:var(--danger);">
-                    Remove
-                  </button>
-                </form>
+            <div style="padding:0.6rem 0;border-bottom:1px solid var(--border);">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div style="display:flex;align-items:center;gap:0.4rem;">
+                  <span style="font-size:1rem;{!person.active ? 'color:var(--muted);text-decoration:line-through;' : ''}">{person.name}</span>
+                  {#if nameCounts[person.name] > 1}
+                    <span style="font-size:0.7rem;color:var(--muted);background:var(--bg);
+                                  border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.35rem;">#{person.id}</span>
+                  {/if}
+                </div>
+                <div style="display:flex;gap:0.5rem;align-items:center;">
+                  <form method="POST" action="?/toggle" use:enhance>
+                    <input type="hidden" name="id" value={person.id} />
+                    <button type="submit" style="background:none;font-size:0.75rem;
+                      color:{person.active ? 'var(--muted)' : 'var(--success)'};">
+                      {person.active ? 'Deactivate' : 'Activate'}
+                    </button>
+                  </form>
+                  <form method="POST" action="?/remove" use:enhance>
+                    <input type="hidden" name="id" value={person.id} />
+                    <button type="submit" style="background:none;font-size:0.75rem;color:var(--danger);">
+                      Remove
+                    </button>
+                  </form>
+                </div>
               </div>
+              <!-- Role change -->
+              <form method="POST" action="?/changeRole" use:enhance
+                style="margin-top:0.35rem;display:flex;align-items:center;gap:0.5rem;">
+                <input type="hidden" name="id" value={person.id} />
+                <span style="font-size:0.75rem;color:var(--muted);">Role:</span>
+                <select name="role" class="input"
+                  style="font-size:0.75rem;padding:0.2rem 0.5rem;width:auto;height:auto;">
+                  {#each ['FOH', 'Bar', 'Kitchen'] as r}
+                    <option value={r} selected={person.role === r}>{r}</option>
+                  {/each}
+                </select>
+                <button type="submit"
+                  style="background:none;font-size:0.75rem;font-weight:600;color:var(--primary);">
+                  Change
+                </button>
+              </form>
+              {#if form && 'roleError' in form}
+                <p class="error-msg" style="font-size:0.75rem;margin-top:0.25rem;">{(form as {roleError: string}).roleError}</p>
+              {/if}
             </div>
           {/each}
         </div>

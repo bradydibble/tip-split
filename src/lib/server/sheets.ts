@@ -12,16 +12,31 @@ async function getToken(credJson: string): Promise<string> {
   return token;
 }
 
-async function sheetIsEmpty(
+async function getFirstRow(
   spreadsheetId: string,
-  range: string,
+  sheetName: string,
   token: string
-): Promise<boolean> {
+): Promise<string[] | null> {
+  const range = encodeURIComponent(`'${sheetName}'!1:1`);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) return true;
+  if (!res.ok) return null;
   const body = await res.json();
-  return !body.values || body.values.length === 0;
+  return body.values?.[0] ?? null;
+}
+
+async function patchHeaderRow(
+  spreadsheetId: string,
+  sheetName: string,
+  token: string
+): Promise<void> {
+  const range = encodeURIComponent(`'${sheetName}'!1:1`);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`;
+  await fetch(url, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: [HEADER_ROW] }),
+  });
 }
 
 export const HEADER_ROW = [
@@ -29,11 +44,13 @@ export const HEADER_ROW = [
   'Gross Tips', 'CC Fee Rate', 'CC Fees', 'Net Tips',
   'Kitchen %', 'Kitchen Pool', 'Liquor Sales', 'Bar Liquor %', 'Bar Pool', 'FOH Pool',
   'Name', 'Role', 'FOH Share', 'Bar Share', 'Kitchen Share', 'Total',
+  'Staff ID', 'Exported At', 'Export ID',
 ];
 
 /**
  * Append rows to a Google Sheet.
  * Writes the header row first only when the sheet is empty.
+ * Patches the header row if it exists but is missing new audit columns.
  */
 export async function appendToSheet(
   spreadsheetId: string,
@@ -45,8 +62,21 @@ export async function appendToSheet(
   const range = encodeURIComponent(`'${sheetName}'!A1`);
   const base = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
 
-  const empty = await sheetIsEmpty(spreadsheetId, range, token);
-  const values = empty ? [HEADER_ROW, ...dataRows] : dataRows;
+  const firstRow = await getFirstRow(spreadsheetId, sheetName, token);
+
+  let values: (string | number)[][];
+  if (!firstRow || firstRow.length === 0) {
+    // Sheet is empty — prepend the header
+    values = [HEADER_ROW, ...dataRows];
+  } else {
+    // Sheet has content — check if the header is up to date
+    const lastHeaderCol = HEADER_ROW[HEADER_ROW.length - 1];
+    if (firstRow[firstRow.length - 1] !== lastHeaderCol) {
+      // Header exists but is missing new columns — patch row 1 in place
+      await patchHeaderRow(spreadsheetId, sheetName, token);
+    }
+    values = dataRows;
+  }
 
   const url = `${base}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
   const res = await fetch(url, {
