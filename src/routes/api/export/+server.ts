@@ -26,12 +26,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   const credJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!credJson) error(400, 'GOOGLE_SERVICE_ACCOUNT_JSON env var not set.');
 
-  // Create export log entry first to get the Export ID
+  // Create export log entry first to get the Export ID and DB-authoritative timestamp
   const { lastInsertRowid: exportId } = db.prepare(
     'INSERT INTO export_log (calculation_id, exported_by) VALUES (?, ?)'
   ).run(calculationId, locals.user.id);
 
-  const exportedAt = new Date().toISOString();
+  const logRow = db.prepare(
+    'SELECT * FROM export_log WHERE id = ?'
+  ).get(exportId) as ExportLogRow;
+
+  const exportedAt = new Date(logRow.exported_at * 1000).toISOString();
 
   // Columns: Date, Shift, Type, Calc ID,
   //          Gross Tips, CC Fee Rate, CC Fees, Net Tips,
@@ -85,5 +89,5 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     'SELECT * FROM export_log WHERE calculation_id = ? ORDER BY exported_at DESC'
   ).all(calculationId) as ExportLogRow[];
 
-  return json({ success: true, exportId: Number(exportId), exportedAt, exportCount: exportLog.length });
+  return json({ success: true, exportId: Number(exportId), exportedAt, exportedAtUnix: logRow.exported_at, exportedBy: locals.user.id, exportCount: exportLog.length });
 };

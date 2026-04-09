@@ -33,8 +33,8 @@
       const json = await res.json();
       if (res.ok) {
         exportMsg = `Exported (Export #${json.exportId})`;
-        // Update local export log so button reflects new state without a page reload
-        exportLog = [{ id: json.exportId, calculation_id: data.calc.id, exported_at: Math.floor(Date.now() / 1000), exported_by: null, location_id: 1 }, ...exportLog];
+        // Use server-returned values to match the actual audit log record
+        exportLog = [{ id: json.exportId, calculation_id: data.calc.id, exported_at: json.exportedAtUnix, exported_by: json.exportedBy, location_id: 1 }, ...exportLog];
       } else {
         exportMsg = `Error: ${json.message}`;
       }
