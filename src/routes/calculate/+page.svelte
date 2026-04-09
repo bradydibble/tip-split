@@ -1,12 +1,16 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import type { PageData, ActionData } from './$types';
+  import type { StaffRow } from '$lib/server/db';
 
   let { data, form }: { data: PageData; form: ActionData } = $props();
 
   let loading = $state(false);
   let shift = $state(data.defaultShift);
   let date = $state(data.today);
+
+  // Live staff list — starts from server data, updated when new person is added
+  let staff = $state<StaffRow[]>(data.staff);
 
   // Staff checked state — all active staff included by default
   let included = $state<Set<number>>(new Set(data.staff.map(s => s.id)));
@@ -17,6 +21,18 @@
     included = next;
   }
 
+  // Quick-add staff
+  let showAddForm = $state(false);
+  let addingStaff = $state(false);
+  let newName = $state('');
+  let newRole = $state<'FOH' | 'Bar' | 'Kitchen'>('FOH');
+  let addError = $state('');
+
+  // Detect duplicate names to show ID badges
+  const nameCounts = $derived(
+    staff.reduce((acc, s) => { acc[s.name] = (acc[s.name] ?? 0) + 1; return acc; }, {} as Record<string, number>)
+  );
+
   type RoleGroup = { label: string; role: 'FOH' | 'Bar' | 'Kitchen' };
   const ROLE_GROUPS: RoleGroup[] = [
     { label: 'FOH', role: 'FOH' },
@@ -26,8 +42,8 @@
 
   const staffByRole = $derived(
     Object.fromEntries(
-      ROLE_GROUPS.map(g => [g.role, data.staff.filter(s => s.role === g.role)])
-    ) as Record<'FOH' | 'Bar' | 'Kitchen', typeof data.staff>
+      ROLE_GROUPS.map(g => [g.role, staff.filter(s => s.role === g.role)])
+    ) as Record<'FOH' | 'Bar' | 'Kitchen', StaffRow[]>
   );
 </script>
 
@@ -103,10 +119,67 @@
 
     <!-- Staff -->
     <div class="card">
-      <p class="label">Staff Working This Shift</p>
-      {#if data.staff.length === 0}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+        <p class="label" style="margin:0;">Staff Working This Shift</p>
+        <button type="button" onclick={() => { showAddForm = !showAddForm; addError = ''; }}
+          style="background:none;font-size:0.8rem;font-weight:600;color:var(--primary);padding:0.2rem 0.5rem;
+                 border:1.5px solid var(--primary);border-radius:6px;">
+          {showAddForm ? 'Cancel' : '+ Add Person'}
+        </button>
+      </div>
+
+      {#if showAddForm}
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem;margin-bottom:0.75rem;">
+          <form method="POST" action="?/addStaff" use:enhance={({ cancel }) => {
+            if (!newName.trim()) { addError = 'Name is required'; cancel(); return; }
+            addingStaff = true;
+            addError = '';
+            return async ({ result, update }) => {
+              addingStaff = false;
+              if (result.type === 'success' && result.data?.addedId) {
+                const newPerson: StaffRow = {
+                  id: result.data.addedId as number,
+                  name: newName.trim(),
+                  role: newRole,
+                  active: 1,
+                  location_id: 1,
+                  source: 'manual',
+                  square_team_member_id: null,
+                };
+                staff = [...staff, newPerson].sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
+                included = new Set([...included, newPerson.id]);
+                newName = '';
+                showAddForm = false;
+              } else if (result.type === 'failure') {
+                addError = String(result.data?.addError ?? 'Failed to add staff member');
+              } else {
+                await update();
+              }
+            };
+          }}>
+            <p style="font-size:0.75rem;font-weight:600;color:var(--muted);margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em;">New Staff Member</p>
+            <div style="display:grid;grid-template-columns:1fr auto;gap:0.5rem;margin-bottom:0.5rem;">
+              <input class="input" type="text" name="name" bind:value={newName}
+                placeholder="Full name" style="font-size:0.9rem;" />
+              <select class="input" name="role" bind:value={newRole}
+                style="width:auto;padding-right:1.5rem;font-size:0.9rem;">
+                <option value="FOH">FOH</option>
+                <option value="Bar">Bar</option>
+                <option value="Kitchen">Kitchen</option>
+              </select>
+            </div>
+            {#if addError}<p class="error-msg" style="margin-bottom:0.5rem;">{addError}</p>{/if}
+            <button type="submit" class="btn btn-primary" style="padding:0.5rem 1rem;font-size:0.875rem;"
+              disabled={addingStaff || !newName.trim()}>
+              {addingStaff ? 'Adding…' : 'Add & Include in This Shift'}
+            </button>
+          </form>
+        </div>
+      {/if}
+
+      {#if staff.length === 0}
         <p style="color:var(--muted);font-size:0.875rem;">
-          No staff yet. <a href="/settings/staff">Add staff in Settings.</a>
+          No staff yet. Use "+ Add Person" above to add someone.
         </p>
       {:else}
         {#each ROLE_GROUPS as { label, role }}
@@ -121,6 +194,10 @@
                   checked={checked} onchange={() => toggleStaff(person.id)}
                   style="width:20px;height:20px;accent-color:var(--primary);cursor:pointer;" />
                 <span style="font-size:1rem;">{person.name}</span>
+                {#if nameCounts[person.name] > 1}
+                  <span style="font-size:0.7rem;color:var(--muted);background:var(--bg);
+                                border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.35rem;">#{person.id}</span>
+                {/if}
               </label>
             {/each}
           {/if}

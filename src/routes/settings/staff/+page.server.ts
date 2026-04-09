@@ -47,4 +47,20 @@ export const actions: Actions = {
     db.prepare('DELETE FROM staff WHERE id = ?').run(id);
     return {};
   },
+
+  changeRole: async ({ request, locals }) => {
+    if (!locals.user || locals.user.role !== 'manager') return fail(403);
+
+    const fd = await request.formData();
+    const id   = String(fd.get('id')   ?? '');
+    const role = String(fd.get('role') ?? '');
+
+    if (!['FOH', 'Kitchen', 'Bar'].includes(role)) return fail(400, { roleError: 'Invalid role' });
+
+    const row = db.prepare('SELECT id FROM staff WHERE id = ?').get(id);
+    if (!row) return fail(404);
+
+    db.prepare('UPDATE staff SET role = ? WHERE id = ?').run(role, id);
+    return {};
+  },
 };
