@@ -6,8 +6,22 @@
 
   let exporting = $state(false);
   let exportMsg = $state('');
+  let exportLog = $state(data.exportLog);
+
+  const lastExport = $derived(exportLog.length > 0 ? exportLog[0] : null);
+
+  function formatExportTime(unixSec: number): string {
+    return new Date(unixSec * 1000).toLocaleString();
+  }
 
   async function exportToSheets() {
+    if (lastExport) {
+      const confirmed = confirm(
+        `This calculation was already exported on ${formatExportTime(lastExport.exported_at)}.\n\nExport again?`
+      );
+      if (!confirmed) return;
+    }
+
     exporting = true;
     exportMsg = '';
     try {
@@ -17,7 +31,13 @@
         body: JSON.stringify({ calculationId: data.calc.id }),
       });
       const json = await res.json();
-      exportMsg = res.ok ? '✓ Exported to Google Sheets' : `Error: ${json.message}`;
+      if (res.ok) {
+        exportMsg = `Exported (Export #${json.exportId})`;
+        // Update local export log so button reflects new state without a page reload
+        exportLog = [{ id: json.exportId, calculation_id: data.calc.id, exported_at: Math.floor(Date.now() / 1000), exported_by: null, location_id: 1 }, ...exportLog];
+      } else {
+        exportMsg = `Error: ${json.message}`;
+      }
     } catch {
       exportMsg = 'Export failed — check Sheets config in Settings';
     }
@@ -62,7 +82,10 @@
       <div class="card">
         <p class="label">FOH — ${formatCents(c.foh_pool_cents)} ÷ {fohDists.length + barDists.length}</p>
         {#each fohDists as d}
-          <div class="row"><span>{d.name}</span><span class="money amt">${formatCents(d.total_cents)}</span></div>
+          <div class="row">
+            <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
+            <span class="money amt">${formatCents(d.total_cents)}</span>
+          </div>
         {/each}
       </div>
     {/if}
@@ -71,7 +94,8 @@
       <div class="card">
         <p class="label">Bar</p>
         {#each barDists as d}
-          <div class="row"><span>{d.name}</span>
+          <div class="row">
+            <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
             <div style="text-align:right;">
               <div class="money amt">${formatCents(d.total_cents)}</div>
               <div style="font-size:0.75rem;color:var(--muted);">
@@ -87,7 +111,10 @@
       <div class="card">
         <p class="label">Kitchen — ${formatCents(c.kitchen_pool_cents)} ÷ {kitDists.length}</p>
         {#each kitDists as d}
-          <div class="row"><span>{d.name}</span><span class="money amt">${formatCents(d.total_cents)}</span></div>
+          <div class="row">
+            <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
+            <span class="money amt">${formatCents(d.total_cents)}</span>
+          </div>
         {/each}
       </div>
     {/if}
@@ -100,14 +127,35 @@
         </div>
       {:else}
         <a href="/calculate/{c.id}/share" class="btn btn-primary">Share Card</a>
-        <button class="btn btn-secondary" onclick={exportToSheets} disabled={exporting}>
-          {exporting ? 'Exporting…' : 'Export to Google Sheets'}
-        </button>
-        {#if exportMsg}
-          <p class:success-msg={exportMsg.startsWith('✓')} class:error-msg={!exportMsg.startsWith('✓')}>
-            {exportMsg}
-          </p>
-        {/if}
+
+        <div>
+          <button class="btn btn-secondary" onclick={exportToSheets} disabled={exporting} style="width:100%;">
+            {#if exporting}
+              Exporting…
+            {:else if lastExport}
+              Export Again to Google Sheets
+            {:else}
+              Export to Google Sheets
+            {/if}
+          </button>
+          {#if lastExport && !exportMsg}
+            <p style="font-size:0.75rem;color:var(--muted);text-align:center;margin-top:0.35rem;">
+              Last exported {formatExportTime(lastExport.exported_at)} · Export #{lastExport.id}
+            </p>
+          {/if}
+          {#if exportLog.length > 1}
+            <p style="font-size:0.75rem;color:var(--muted);text-align:center;margin-top:0.2rem;">
+              {exportLog.length} total exports
+            </p>
+          {/if}
+          {#if exportMsg}
+            <p class:success-msg={!exportMsg.startsWith('Error')} class:error-msg={exportMsg.startsWith('Error')}
+               style="text-align:center;margin-top:0.35rem;">
+              {exportMsg}
+            </p>
+          {/if}
+        </div>
+
         <form method="POST" action="?/void">
           <button type="submit" class="btn btn-danger"
             onclick={e => { if (!confirm('Void this calculation? A VOID row will be added to Google Sheets.')) e.preventDefault(); }}>
@@ -133,4 +181,10 @@
   .row.muted { color: var(--muted); }
   .row.total { font-weight: 700; color: var(--text); }
   .amt { font-size: 1.1rem; font-weight: 600; color: var(--primary); }
+  .staff-id {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-left: 0.3rem;
+    font-weight: 400;
+  }
 </style>

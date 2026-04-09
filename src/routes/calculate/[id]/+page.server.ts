@@ -1,7 +1,7 @@
 import type { Actions, PageServerLoad } from './$types';
 import { error, fail, redirect } from '@sveltejs/kit';
 import db from '$lib/server/db';
-import type { CalcRow, DistRow } from '$lib/server/db';
+import type { CalcRow, DistRow, ExportLogRow } from '$lib/server/db';
 import { getSettings } from '$lib/server/auth';
 import { appendToSheet } from '$lib/server/sheets';
 
@@ -18,7 +18,11 @@ export const load: PageServerLoad = ({ locals, params }) => {
     'SELECT * FROM tip_distributions WHERE calculation_id = ? ORDER BY role, name'
   ).all(params.id) as DistRow[];
 
-  return { calc, distributions };
+  const exportLog = db.prepare(
+    'SELECT * FROM export_log WHERE calculation_id = ? ORDER BY exported_at DESC'
+  ).all(params.id) as ExportLogRow[];
+
+  return { calc, distributions, exportLog };
 };
 
 export const actions: Actions = {

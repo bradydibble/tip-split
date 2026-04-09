@@ -98,4 +98,21 @@ export const actions: Actions = {
 
     redirect(303, `/calculate/${calcId}`);
   },
+
+  addStaff: async ({ request, locals }) => {
+    if (!locals.user) redirect(303, '/');
+
+    const fd = await request.formData();
+    const name = String(fd.get('name') ?? '').trim();
+    const role = String(fd.get('role') ?? '');
+
+    if (!name) return fail(400, { addError: 'Name is required' });
+    if (!['FOH', 'Kitchen', 'Bar'].includes(role)) return fail(400, { addError: 'Invalid role' });
+
+    const { lastInsertRowid } = db.prepare(
+      'INSERT INTO staff (name, role) VALUES (?, ?)'
+    ).run(name, role);
+
+    return { addedId: Number(lastInsertRowid), addedName: name };
+  },
 };

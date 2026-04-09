@@ -4,7 +4,7 @@ import db from '$lib/server/db';
 import { getSettings } from '$lib/server/auth';
 import { appendToSheet } from '$lib/server/sheets';
 import { formatCents } from '$lib/calculator';
-import type { CalcRow, DistRow } from '$lib/server/db';
+import type { CalcRow, DistRow, ExportLogRow } from '$lib/server/db';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
   if (!locals.user) error(401, 'Unauthorized');
@@ -26,10 +26,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   const credJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!credJson) error(400, 'GOOGLE_SERVICE_ACCOUNT_JSON env var not set.');
 
+  // Create export log entry first to get the Export ID
+  const { lastInsertRowid: exportId } = db.prepare(
+    'INSERT INTO export_log (calculation_id, exported_by) VALUES (?, ?)'
+  ).run(calculationId, locals.user.id);
+
+  const exportedAt = new Date().toISOString();
+
   // Columns: Date, Shift, Type, Calc ID,
   //          Gross Tips, CC Fee Rate, CC Fees, Net Tips,
   //          Kitchen %, Kitchen Pool, Liquor Sales, Bar Liquor %, Bar Pool, FOH Pool,
-  //          Name, Role, FOH Share, Bar Share, Kitchen Share, Total
+  //          Name, Role, FOH Share, Bar Share, Kitchen Share, Total,
+  //          Staff ID, Exported At, Export ID
 
   const summaryRow: (string | number)[] = [
     calc.date, calc.shift, 'summary', calc.id,
@@ -44,6 +52,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     formatCents(calc.bar_pool_cents),
     formatCents(calc.foh_pool_cents),
     '', '', '', '', '', '',
+    '', exportedAt, Number(exportId),
   ];
 
   const staffRows: (string | number)[][] = dists.map(d => [
@@ -54,6 +63,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     formatCents(d.bar_pool_share_cents),
     formatCents(d.kitchen_share_cents),
     formatCents(d.total_cents),
+    d.staff_id ?? '', exportedAt, Number(exportId),
   ]);
 
   try {
@@ -64,9 +74,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
       credJson
     );
   } catch (e) {
+    // Roll back export log entry on failure
+    db.prepare('DELETE FROM export_log WHERE id = ?').run(exportId);
     const msg = e instanceof Error ? e.message : 'Unknown error';
     error(500, `Sheets export failed: ${msg}`);
   }
 
-  return json({ success: true });
+  // Return export info so the UI can update
+  const exportLog = db.prepare(
+    'SELECT * FROM export_log WHERE calculation_id = ? ORDER BY exported_at DESC'
+  ).all(calculationId) as ExportLogRow[];
+
+  return json({ success: true, exportId: Number(exportId), exportedAt, exportCount: exportLog.length });
 };
