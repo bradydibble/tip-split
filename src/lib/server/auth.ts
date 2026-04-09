@@ -18,6 +18,8 @@ export async function findUserByPin(pin: string): Promise<UserRow | null> {
   return null;
 }
 
+// Sessions use a cryptographically random 32-byte token stored server-side in SQLite.
+// No cookie signing is needed because the token itself is the secret.
 export function createSession(userId: number): string {
   const id = randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + SESSION_TTL_SECS * 1000).toISOString();
