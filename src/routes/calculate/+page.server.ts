@@ -14,10 +14,18 @@ export const load: PageServerLoad = ({ locals }) => {
 
   const settings = getSettings();
   const today = new Date().toISOString().split('T')[0];
-  const cutoffHour = parseInt(settings.lunch_cutoff?.split(':')[0] ?? '15', 10);
-  // Convert Pacific time: UTC-7 (PDT) or UTC-8 (PST) — approximate with UTC-7
-  const pacificHour = (new Date().getUTCHours() - 7 + 24) % 24;
-  const defaultShift = pacificHour >= cutoffHour ? 'Dinner' : 'Lunch';
+  const [cutoffH, cutoffM] = (settings.lunch_cutoff ?? '15:00').split(':').map(Number);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const localHour   = parseInt(parts.find(p => p.type === 'hour')!.value,   10);
+  const localMinute = parseInt(parts.find(p => p.type === 'minute')!.value, 10);
+  const defaultShift = localHour > cutoffH || (localHour === cutoffH && localMinute >= cutoffM)
+    ? 'Dinner'
+    : 'Lunch';
 
   return { staff, settings, today, defaultShift, user: locals.user };
 };

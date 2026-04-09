@@ -44,7 +44,6 @@ cp .env.example .env
 Edit `.env` — at minimum:
 
 ```bash
-SESSION_SECRET=    # openssl rand -hex 32
 INITIAL_MANAGER_PIN=1234   # remove after first login
 ```
 
@@ -194,7 +193,7 @@ Each exported calculation appends one row with the full breakdown.
 
 ```bash
 npm install
-cp .env.example .env    # set SESSION_SECRET and INITIAL_MANAGER_PIN
+cp .env.example .env    # set INITIAL_MANAGER_PIN
 npm run dev             # http://localhost:5173
 npm test                # unit tests
 npm run check           # TypeScript
