@@ -29,6 +29,7 @@ export const HEADER_ROW = [
   'Gross Tips', 'CC Fee Rate', 'CC Fees', 'Net Tips',
   'Kitchen %', 'Kitchen Pool', 'Liquor Sales', 'Bar Liquor %', 'Bar Pool', 'FOH Pool',
   'Name', 'Role', 'FOH Share', 'Bar Share', 'Kitchen Share', 'Total',
+  'Staff ID', 'Exported At', 'Export ID',
 ];
 
 /**
