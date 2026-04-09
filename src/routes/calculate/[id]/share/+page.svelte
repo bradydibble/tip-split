@@ -11,6 +11,43 @@
     const order = { FOH: 0, Bar: 1, Kitchen: 2 } as Record<string, number>;
     return (order[a.role] ?? 9) - (order[b.role] ?? 9) || a.name.localeCompare(b.name);
   }));
+
+  let copyFeedback = $state('');
+
+  function buildShareText(): string {
+    const lines: string[] = [
+      `TipSplit — ${c.date} · ${c.shift} Shift`,
+      '',
+      `Gross Tips:      $${formatCents(c.gross_tips_cents)}`,
+      `CC Fees:        −$${formatCents(c.cc_fees_cents)}`,
+      `Kitchen Pool:    $${formatCents(c.kitchen_pool_cents)}`,
+    ];
+    if (c.bar_pool_cents > 0) {
+      lines.push(`Bar Pool:        $${formatCents(c.bar_pool_cents)}`);
+    }
+    lines.push('');
+    for (const d of sorted) {
+      lines.push(`${d.name} (${d.role}): $${formatCents(d.total_cents)}`);
+    }
+    const total = dists.reduce((s, d) => s + d.total_cents, 0);
+    lines.push('', `Total Distributed: $${formatCents(total)}`);
+    return lines.join('\n');
+  }
+
+  async function shareViaMessenger() {
+    const text = buildShareText();
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: 'TipSplit', text });
+      } catch {
+        // user cancelled or share failed — do nothing
+      }
+    } else {
+      await navigator.clipboard.writeText(text);
+      copyFeedback = 'Copied!';
+      setTimeout(() => { copyFeedback = ''; }, 2000);
+    }
+  }
 </script>
 
 <!-- Clean share card — designed to screenshot, no chrome -->
@@ -66,6 +103,16 @@
         ${formatCents(dists.reduce((s, d) => s + d.total_cents, 0))}
       </span>
     </div>
+  </div>
+
+  <div class="share-actions">
+    <button class="share-btn" onclick={shareViaMessenger}>
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M22 2 11 13"/>
+        <path d="M22 2 15 22 11 13 2 9l20-7z"/>
+      </svg>
+      {copyFeedback || 'Share via Messenger'}
+    </button>
   </div>
 </div>
 
@@ -172,4 +219,32 @@
     font-size: 1.1rem;
     color: var(--text);
   }
+
+  .share-actions {
+    margin-top: 1.25rem;
+    width: 100%;
+    max-width: 360px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .share-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--primary);
+    color: #0f172a;
+    border: none;
+    border-radius: 10px;
+    padding: 0.75rem 1.5rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+    width: 100%;
+    justify-content: center;
+    transition: opacity 0.15s;
+  }
+
+  .share-btn:hover { opacity: 0.85; }
+  .share-btn:active { opacity: 0.7; }
 </style>
