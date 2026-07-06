@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN npm run build
+RUN npm rebuild better-sqlite3 && npm run build
 
 FROM node:20-slim
 WORKDIR /app
