@@ -13,7 +13,7 @@
   let staff = $state<StaffRow[]>(data.staff);
 
   // Staff checked state — all active staff included by default
-  let included = $state<Set<number>>(new Set(data.staff.map(s => s.id)));
+  let included = $state<Set<number>>(new Set());
 
   function toggleStaff(id: number) {
     const next = new Set(included);
@@ -121,6 +121,15 @@
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
         <p class="label" style="margin:0;">Staff Working This Shift</p>
+        {#if staff.length > 0}
+          <div style="display:flex;gap:0.25rem;align-items:center;font-size:0.75rem;">
+            <button type="button" onclick={() => { included = new Set(staff.map(s => s.id)); }}
+              style="background:none;border:none;color:var(--primary);padding:0;cursor:pointer;font-size:0.75rem;">Select All</button>
+            <span style="color:var(--muted);">·</span>
+            <button type="button" onclick={() => { included = new Set(); }}
+              style="background:none;border:none;color:var(--primary);padding:0;cursor:pointer;font-size:0.75rem;">Deselect All</button>
+          </div>
+        {/if}
         <button type="button" onclick={() => { showAddForm = !showAddForm; addError = ''; }}
           style="background:none;font-size:0.8rem;font-weight:600;color:var(--primary);padding:0.2rem 0.5rem;
                  border:1.5px solid var(--primary);border-radius:6px;">
