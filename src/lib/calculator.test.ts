@@ -183,3 +183,72 @@ describe('calculate — edge cases', () => {
     });
   });
 });
+
+// ── Bussers ─────────────────────────────────────────────────────────────────
+// Busser = fixed per-person cut from the post-kitchen remainder, taken before
+// the bar/FOH split. Bussers do NOT share the FOH pool.
+describe('calculate — bussers', () => {
+  const STAFF_WITH_BUSSERS = [
+    ...STAFF,
+    { id: 10, name: 'Busser J', role: 'Busser' as const },
+    { id: 11, name: 'Busser K', role: 'Busser' as const },
+  ];
+  const r = calculate({
+    ...BASE_INPUT, staff: STAFF_WITH_BUSSERS,
+    config: { ...BASE_INPUT.config, roundToDollar: false },
+  });
+  const bussers = r.distributions.filter(d => d.role === 'Busser');
+
+  it('default busser rate is $20/person; pool = rate × count', () => {
+    expect(r.busserStaffCount).toBe(2);
+    expect(r.busserPoolCents).toBe(4000); // 2 × $20
+  });
+
+  it('each busser gets exactly the fixed rate, nothing else', () => {
+    expect(bussers).toHaveLength(2);
+    bussers.forEach(d => {
+      expect(d.busserShareCents).toBe(2000);
+      expect(d.totalCents).toBe(2000);
+      expect(d.fohShareCents).toBe(0);
+      expect(d.barPoolShareCents).toBe(0);
+      expect(d.kitchenShareCents).toBe(0);
+    });
+  });
+
+  it('busser pool is deducted after kitchen, before the bar/FOH split', () => {
+    expect(r.remainingAfterKitchenCents).toBe(91675);       // $916.75
+    expect(r.remainingAfterBusserCents).toBe(91675 - 4000); // $876.75
+    expect(r.barPoolCents).toBe(9650);
+    expect(r.fohPoolCents).toBe(91675 - 4000 - 9650);       // $780.25 (was $820.25 w/o bussers)
+  });
+
+  it('bussers do NOT participate in the FOH pool', () => {
+    expect(r.fohPoolParticipantCount).toBe(6); // 5 FOH + 1 Bar only
+  });
+
+  it('custom busser rate is honored', () => {
+    const r2 = calculate({
+      ...BASE_INPUT, staff: STAFF_WITH_BUSSERS,
+      config: { ...BASE_INPUT.config, busserRateCents: 2500, roundToDollar: false },
+    });
+    const b2 = r2.distributions.filter(d => d.role === 'Busser');
+    expect(r2.busserPoolCents).toBe(5000); // 2 × $25
+    b2.forEach(d => expect(d.totalCents).toBe(2500));
+  });
+
+  it('no bussers → pool zero and legacy FOH pool is unchanged', () => {
+    const rNo = calculate({ ...BASE_INPUT, config: { ...BASE_INPUT.config, roundToDollar: false } });
+    expect(rNo.busserStaffCount).toBe(0);
+    expect(rNo.busserPoolCents).toBe(0);
+    expect(rNo.fohPoolCents).toBe(82025); // unchanged from pre-busser behavior
+  });
+
+  it('roundToDollar mode: bussers still get exact whole-dollar rate', () => {
+    const rRound = calculate({ ...BASE_INPUT, staff: STAFF_WITH_BUSSERS }, makeRng());
+    const b = rRound.distributions.filter(d => d.role === 'Busser');
+    b.forEach(d => {
+      expect(d.totalCents).toBe(2000);
+      expect(d.totalCents % 100).toBe(0);
+    });
+  });
+});

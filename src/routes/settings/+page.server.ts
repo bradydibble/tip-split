@@ -20,6 +20,7 @@ export const actions: Actions = {
     const ccFeeRate   = parseFloat(String(fd.get('cc_fee_rate')   ?? ''));
     const kitchenPct  = parseFloat(String(fd.get('kitchen_pct')   ?? ''));
     const barLiquorPct = parseFloat(String(fd.get('bar_liquor_pct') ?? ''));
+    const busserRate  = parseFloat(String(fd.get('busser_rate')   ?? ''));
 
     if (isNaN(ccFeeRate)    || ccFeeRate    < 0 || ccFeeRate    > 100)
       return fail(400, { error: 'CC fee rate must be between 0 and 100' });
@@ -27,6 +28,8 @@ export const actions: Actions = {
       return fail(400, { error: 'Kitchen % must be between 0 and 100' });
     if (isNaN(barLiquorPct) || barLiquorPct < 0 || barLiquorPct > 100)
       return fail(400, { error: 'Bar liquor % must be between 0 and 100' });
+    if (isNaN(busserRate)   || busserRate   < 0)
+      return fail(400, { error: 'Busser rate must be $0 or more' });
     if (kitchenPct + barLiquorPct > 100)
       return fail(400, { error: 'Kitchen % and bar liquor % cannot exceed 100% combined' });
 
@@ -34,6 +37,7 @@ export const actions: Actions = {
       ['cc_fee_rate',                  String(ccFeeRate)],
       ['kitchen_pct',                  String(kitchenPct)],
       ['bar_liquor_pct',               String(barLiquorPct)],
+      ['busser_rate',                  String(busserRate)],
       ['lunch_cutoff',                 String(fd.get('lunch_cutoff') ?? '15:00')],
       ['restaurant_name',              String(fd.get('restaurant_name') ?? '')],
       ['google_sheets_spreadsheet_id', String(fd.get('google_sheets_spreadsheet_id') ?? '')],

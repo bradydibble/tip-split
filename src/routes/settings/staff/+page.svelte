@@ -36,6 +36,7 @@
             <option>FOH</option>
             <option>Bar</option>
             <option>Kitchen</option>
+            <option>Busser</option>
           </select>
         </div>
         {#if form && 'addError' in form}<p class="error-msg">{(form as {addError: string}).addError}</p>{/if}
@@ -46,7 +47,7 @@
     </div>
 
     <!-- Existing staff -->
-    {#each [['FOH', 'FOH / Server'], ['Bar', 'Bar / Bartender'], ['Kitchen', 'Kitchen']] as [role, label]}
+    {#each [['FOH', 'FOH / Server'], ['Bar', 'Bar / Bartender'], ['Kitchen', 'Kitchen'], ['Busser', 'Busser']] as [role, label]}
       {@const group = data.staff.filter(s => s.role === role)}
       {#if group.length > 0}
         <div class="card">
@@ -84,7 +85,7 @@
                 <span style="font-size:0.75rem;color:var(--muted);">Role:</span>
                 <select name="role" class="input"
                   style="font-size:0.75rem;padding:0.2rem 0.5rem;width:auto;height:auto;">
-                  {#each ['FOH', 'Bar', 'Kitchen'] as r}
+                  {#each ['FOH', 'Bar', 'Kitchen', 'Busser'] as r}
                     <option value={r} selected={person.role === r}>{r}</option>
                   {/each}
                 </select>

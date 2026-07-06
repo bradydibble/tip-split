@@ -1,4 +1,4 @@
-export type StaffRole = 'FOH' | 'Kitchen' | 'Bar';
+export type StaffRole = 'FOH' | 'Kitchen' | 'Bar' | 'Busser';
 
 export interface StaffMember {
   id: number;
@@ -10,6 +10,7 @@ export interface SplitConfig {
   ccFeeRate: number;      // decimal, e.g. 0.025 for 2.5%
   kitchenPct: number;     // decimal, e.g. 0.05 for 5%
   barLiquorPct: number;   // decimal, e.g. 0.10 for 10%
+  busserRateCents?: number; // fixed per-busser payout in cents; default 2000 ($20)
   roundToDollar?: boolean; // default true — whole-dollar payouts
 }
 
@@ -24,9 +25,10 @@ export interface Distribution {
   staffId: number;
   name: string;
   role: StaffRole;
-  fohShareCents: number;       // 0 for Kitchen; Bar staff also receive a FOH share (they participate in the FOH pool)
-  barPoolShareCents: number;   // 0 for FOH and Kitchen
-  kitchenShareCents: number;   // 0 for FOH and Bar
+  fohShareCents: number;       // 0 for Kitchen/Busser; Bar staff also receive a FOH share (they participate in the FOH pool)
+  barPoolShareCents: number;   // 0 for FOH, Kitchen, Busser
+  kitchenShareCents: number;   // 0 for FOH, Bar, Busser
+  busserShareCents: number;    // fixed per-person amount; 0 for FOH, Bar, Kitchen
   totalCents: number;
 }
 
@@ -36,6 +38,8 @@ export interface CalculationResult {
   tipsAfterFeesCents: number;
   kitchenPoolCents: number;
   remainingAfterKitchenCents: number;
+  busserPoolCents: number;
+  remainingAfterBusserCents: number;
   liquorSalesCents: number;
   barPoolCents: number;
   fohPoolCents: number;
@@ -43,6 +47,7 @@ export interface CalculationResult {
   fohPoolParticipantCount: number;
   kitchenStaffCount: number;
   barStaffCount: number;
+  busserStaffCount: number;
   distributions: Distribution[];
   config: SplitConfig;
 }
@@ -107,16 +112,25 @@ export function calculate(input: CalculatorInput, rng: () => number = Math.rando
   // Round each computed amount to the nearest dollar when roundToDollar: true
   const toDollars = (cents: number) => roundToDollar ? Math.round(cents / 100) * 100 : cents;
 
+  const busserRateCents = config.busserRateCents ?? 2000; // fixed $20/busser default
+
   const ccFeesCents             = toDollars(Math.round(grossTipsCents * config.ccFeeRate));
   const tipsAfterFeesCents      = grossTipsCents - ccFeesCents;
   const kitchenPoolCents        = toDollars(Math.round(tipsAfterFeesCents * config.kitchenPct));
   const remainingAfterKitchenCents = tipsAfterFeesCents - kitchenPoolCents;
-  const barPoolCents            = toDollars(Math.round(liquorSalesCents * config.barLiquorPct));
-  const fohPoolCents            = remainingAfterKitchenCents - barPoolCents;
 
   const fohStaff     = staff.filter(s => s.role === 'FOH');
   const kitchenStaff = staff.filter(s => s.role === 'Kitchen');
   const barStaff     = staff.filter(s => s.role === 'Bar');
+  const busserStaff  = staff.filter(s => s.role === 'Busser');
+
+  // Bussers take a fixed per-person cut from the post-kitchen remainder, before
+  // the bar/FOH split. Bussers do NOT share the FOH pool. The rate is a whole
+  // dollar amount, so it needs no rounding.
+  const busserPoolCents            = busserRateCents * busserStaff.length;
+  const remainingAfterBusserCents  = remainingAfterKitchenCents - busserPoolCents;
+  const barPoolCents            = toDollars(Math.round(liquorSalesCents * config.barLiquorPct));
+  const fohPoolCents            = remainingAfterBusserCents - barPoolCents;
 
   // Bar staff participate in the FOH pool split alongside FOH staff
   const fohPoolParticipants = [...fohStaff, ...barStaff];
@@ -131,18 +145,18 @@ export function calculate(input: CalculatorInput, rng: () => number = Math.rando
     for (let i = 0; i < fohStaff.length; i++) {
       const cents = fohDollars[i] * 100;
       distributions.push({ staffId: fohStaff[i].id, name: fohStaff[i].name, role: 'FOH',
-        fohShareCents: cents, barPoolShareCents: 0, kitchenShareCents: 0, totalCents: cents });
+        fohShareCents: cents, barPoolShareCents: 0, kitchenShareCents: 0, busserShareCents: 0, totalCents: cents });
     }
     for (let i = 0; i < barStaff.length; i++) {
       const fohCents = fohDollars[fohStaff.length + i] * 100;
       const barCents = barDollars[i] * 100;
       distributions.push({ staffId: barStaff[i].id, name: barStaff[i].name, role: 'Bar',
-        fohShareCents: fohCents, barPoolShareCents: barCents, kitchenShareCents: 0, totalCents: fohCents + barCents });
+        fohShareCents: fohCents, barPoolShareCents: barCents, kitchenShareCents: 0, busserShareCents: 0, totalCents: fohCents + barCents });
     }
     for (let i = 0; i < kitchenStaff.length; i++) {
       const cents = kitchenDollars[i] * 100;
       distributions.push({ staffId: kitchenStaff[i].id, name: kitchenStaff[i].name, role: 'Kitchen',
-        fohShareCents: 0, barPoolShareCents: 0, kitchenShareCents: cents, totalCents: cents });
+        fohShareCents: 0, barPoolShareCents: 0, kitchenShareCents: cents, busserShareCents: 0, totalCents: cents });
     }
   } else {
     const fohCents     = distributePoolCents(fohPoolCents,     fohPoolParticipants.length);
@@ -151,25 +165,34 @@ export function calculate(input: CalculatorInput, rng: () => number = Math.rando
 
     for (let i = 0; i < fohStaff.length; i++) {
       distributions.push({ staffId: fohStaff[i].id, name: fohStaff[i].name, role: 'FOH',
-        fohShareCents: fohCents[i], barPoolShareCents: 0, kitchenShareCents: 0, totalCents: fohCents[i] });
+        fohShareCents: fohCents[i], barPoolShareCents: 0, kitchenShareCents: 0, busserShareCents: 0, totalCents: fohCents[i] });
     }
     for (let i = 0; i < barStaff.length; i++) {
       const fohCents_i = fohCents[fohStaff.length + i];
       const barCents_i = barCents[i];
       distributions.push({ staffId: barStaff[i].id, name: barStaff[i].name, role: 'Bar',
-        fohShareCents: fohCents_i, barPoolShareCents: barCents_i, kitchenShareCents: 0, totalCents: fohCents_i + barCents_i });
+        fohShareCents: fohCents_i, barPoolShareCents: barCents_i, kitchenShareCents: 0, busserShareCents: 0, totalCents: fohCents_i + barCents_i });
     }
     for (let i = 0; i < kitchenStaff.length; i++) {
       distributions.push({ staffId: kitchenStaff[i].id, name: kitchenStaff[i].name, role: 'Kitchen',
-        fohShareCents: 0, barPoolShareCents: 0, kitchenShareCents: kitchenCents[i], totalCents: kitchenCents[i] });
+        fohShareCents: 0, barPoolShareCents: 0, kitchenShareCents: kitchenCents[i], busserShareCents: 0, totalCents: kitchenCents[i] });
     }
+  }
+
+  // Bussers each receive the fixed rate — identical in both rounding modes.
+  for (const b of busserStaff) {
+    distributions.push({ staffId: b.id, name: b.name, role: 'Busser',
+      fohShareCents: 0, barPoolShareCents: 0, kitchenShareCents: 0,
+      busserShareCents: busserRateCents, totalCents: busserRateCents });
   }
 
   return {
     grossTipsCents, ccFeesCents, tipsAfterFeesCents, kitchenPoolCents,
-    remainingAfterKitchenCents, liquorSalesCents, barPoolCents, fohPoolCents,
+    remainingAfterKitchenCents, busserPoolCents, remainingAfterBusserCents,
+    liquorSalesCents, barPoolCents, fohPoolCents,
     fohStaffCount: fohStaff.length, fohPoolParticipantCount: fohPoolParticipants.length,
     kitchenStaffCount: kitchenStaff.length, barStaffCount: barStaff.length,
+    busserStaffCount: busserStaff.length,
     distributions, config,
   };
 }

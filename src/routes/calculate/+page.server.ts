@@ -61,9 +61,10 @@ export const actions: Actions = {
 
     const settings = getSettings();
     const config = {
-      ccFeeRate:    parseFloat(settings.cc_fee_rate)    / 100,
-      kitchenPct:   parseFloat(settings.kitchen_pct)    / 100,
-      barLiquorPct: parseFloat(settings.bar_liquor_pct) / 100,
+      ccFeeRate:       parseFloat(settings.cc_fee_rate)    / 100,
+      kitchenPct:      parseFloat(settings.kitchen_pct)    / 100,
+      barLiquorPct:    parseFloat(settings.bar_liquor_pct) / 100,
+      busserRateCents: dollarsToCents(settings.busser_rate ?? '20'),
     };
 
     const result = calculate({
@@ -77,15 +78,15 @@ export const actions: Actions = {
       INSERT INTO tip_calculations
         (date, shift, gross_tips_cents, liquor_sales_cents, cc_fee_rate, kitchen_pct,
          bar_liquor_pct, cc_fees_cents, tips_after_fees_cents, kitchen_pool_cents,
-         bar_pool_cents, foh_pool_cents)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+         bar_pool_cents, busser_pool_cents, foh_pool_cents)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
 
     const insertDist = db.prepare(`
       INSERT INTO tip_distributions
         (calculation_id, staff_id, name, role, foh_share_cents,
-         bar_pool_share_cents, kitchen_share_cents, total_cents)
-      VALUES (?,?,?,?,?,?,?,?)
+         bar_pool_share_cents, kitchen_share_cents, busser_share_cents, total_cents)
+      VALUES (?,?,?,?,?,?,?,?,?)
     `);
 
     const calcId = db.transaction(() => {
@@ -93,12 +94,12 @@ export const actions: Actions = {
         date, shift, result.grossTipsCents, result.liquorSalesCents,
         config.ccFeeRate, config.kitchenPct, config.barLiquorPct,
         result.ccFeesCents, result.tipsAfterFeesCents,
-        result.kitchenPoolCents, result.barPoolCents, result.fohPoolCents
+        result.kitchenPoolCents, result.barPoolCents, result.busserPoolCents, result.fohPoolCents
       );
       for (const d of result.distributions) {
         insertDist.run(
           lastInsertRowid, d.staffId, d.name, d.role,
-          d.fohShareCents, d.barPoolShareCents, d.kitchenShareCents, d.totalCents
+          d.fohShareCents, d.barPoolShareCents, d.kitchenShareCents, d.busserShareCents, d.totalCents
         );
       }
       return lastInsertRowid;
@@ -115,7 +116,7 @@ export const actions: Actions = {
     const role = String(fd.get('role') ?? '');
 
     if (!name) return fail(400, { addError: 'Name is required' });
-    if (!['FOH', 'Kitchen', 'Bar'].includes(role)) return fail(400, { addError: 'Invalid role' });
+    if (!['FOH', 'Kitchen', 'Bar', 'Busser'].includes(role)) return fail(400, { addError: 'Invalid role' });
 
     const { lastInsertRowid } = db.prepare(
       'INSERT INTO staff (name, role) VALUES (?, ?)'
