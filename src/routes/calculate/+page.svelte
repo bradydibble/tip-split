@@ -175,6 +175,7 @@
                 <option value="FOH">FOH</option>
                 <option value="Bar">Bar</option>
                 <option value="Kitchen">Kitchen</option>
+                <option value="Busser">Busser</option>
               </select>
             </div>
             {#if addError}<p class="error-msg" style="margin-bottom:0.5rem;">{addError}</p>{/if}

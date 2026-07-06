@@ -23,7 +23,7 @@ export const actions: Actions = {
     const role = String(fd.get('role') ?? '');
 
     if (!name) return fail(400, { addError: 'Name is required' });
-    if (!['FOH', 'Kitchen', 'Bar'].includes(role)) return fail(400, { addError: 'Invalid role' });
+    if (!['FOH', 'Kitchen', 'Bar', 'Busser'].includes(role)) return fail(400, { addError: 'Invalid role' });
 
     db.prepare('INSERT INTO staff (name, role) VALUES (?, ?)').run(name, role);
     return {};
@@ -55,7 +55,7 @@ export const actions: Actions = {
     const id   = String(fd.get('id')   ?? '');
     const role = String(fd.get('role') ?? '');
 
-    if (!['FOH', 'Kitchen', 'Bar'].includes(role)) return fail(400, { roleError: 'Invalid role' });
+    if (!['FOH', 'Kitchen', 'Bar', 'Busser'].includes(role)) return fail(400, { roleError: 'Invalid role' });
 
     const row = db.prepare('SELECT id FROM staff WHERE id = ?').get(id);
     if (!row) return fail(404);

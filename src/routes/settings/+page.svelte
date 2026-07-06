@@ -41,6 +41,12 @@
         </label>
 
         <label class="field">
+          <span>Busser Rate ($ per busser)</span>
+          <input class="input" type="number" name="busser_rate" step="1" min="0"
+            value={data.settings.busser_rate} required />
+        </label>
+
+        <label class="field">
           <span>Lunch Cutoff (Pacific, 24h)</span>
           <input class="input" type="time" name="lunch_cutoff"
             value={data.settings.lunch_cutoff ?? '15:00'} />

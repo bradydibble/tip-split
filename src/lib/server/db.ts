@@ -25,7 +25,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS staff (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     name                  TEXT    NOT NULL,
-    role                  TEXT    NOT NULL CHECK (role IN ('FOH', 'Kitchen', 'Bar')),
+    role                  TEXT    NOT NULL CHECK (role IN ('FOH', 'Kitchen', 'Bar', 'Busser')),
     active                INTEGER NOT NULL DEFAULT 1,
     location_id           INTEGER NOT NULL DEFAULT 1 CHECK (location_id = 1),
     source                TEXT    NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'square')),
@@ -53,6 +53,7 @@ db.exec(`
     tips_after_fees_cents INTEGER NOT NULL,
     kitchen_pool_cents    INTEGER NOT NULL,
     bar_pool_cents        INTEGER NOT NULL,
+    busser_pool_cents     INTEGER NOT NULL DEFAULT 0,
     foh_pool_cents        INTEGER NOT NULL,
     location_id           INTEGER NOT NULL DEFAULT 1 CHECK (location_id = 1),
     created_at            INTEGER NOT NULL DEFAULT (unixepoch())
@@ -67,6 +68,7 @@ db.exec(`
     foh_share_cents      INTEGER NOT NULL DEFAULT 0,
     bar_pool_share_cents INTEGER NOT NULL DEFAULT 0,
     kitchen_share_cents  INTEGER NOT NULL DEFAULT 0,
+    busser_share_cents   INTEGER NOT NULL DEFAULT 0,
     total_cents          INTEGER NOT NULL
   );
 
@@ -98,8 +100,38 @@ for (const sql of [
   "ALTER TABLE staff ADD COLUMN square_team_member_id TEXT",
   "ALTER TABLE users ADD COLUMN name TEXT",
   "ALTER TABLE tip_calculations ADD COLUMN voided INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE tip_calculations ADD COLUMN busser_pool_cents INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE tip_distributions ADD COLUMN busser_share_cents INTEGER NOT NULL DEFAULT 0",
 ]) {
   try { db.exec(sql); } catch { /* column already exists */ }
+}
+
+// Migration: allow the 'Busser' role on existing staff tables. SQLite can't
+// ALTER a CHECK constraint, so recreate the table (12-step procedure) only if
+// the current definition predates Busser.
+const staffDef = (db.prepare(
+  "SELECT sql FROM sqlite_master WHERE type='table' AND name='staff'"
+).get() as { sql: string } | undefined)?.sql ?? '';
+if (staffDef && !staffDef.includes('Busser')) {
+  db.pragma('foreign_keys = OFF');
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE staff_new (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        name                  TEXT    NOT NULL,
+        role                  TEXT    NOT NULL CHECK (role IN ('FOH', 'Kitchen', 'Bar', 'Busser')),
+        active                INTEGER NOT NULL DEFAULT 1,
+        location_id           INTEGER NOT NULL DEFAULT 1 CHECK (location_id = 1),
+        source                TEXT    NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'square')),
+        square_team_member_id TEXT    UNIQUE
+      );
+      INSERT INTO staff_new (id, name, role, active, location_id, source, square_team_member_id)
+        SELECT id, name, role, active, location_id, source, square_team_member_id FROM staff;
+      DROP TABLE staff;
+      ALTER TABLE staff_new RENAME TO staff;
+    `);
+  })();
+  db.pragma('foreign_keys = ON');
 }
 
 // Seed default settings
@@ -110,6 +142,7 @@ for (const [key, value] of [
   ['cc_fee_rate',                  '2.5'],
   ['kitchen_pct',                  '30'],
   ['bar_liquor_pct',               '10'],
+  ['busser_rate',                  '20'],
   ['lunch_cutoff',                 '15:00'],
   ['restaurant_name',              'My Restaurant'],
   ['google_sheets_spreadsheet_id', ''],
@@ -143,7 +176,7 @@ export type UserRow = {
 export type StaffRow = {
   id: number;
   name: string;
-  role: 'FOH' | 'Kitchen' | 'Bar';
+  role: 'FOH' | 'Kitchen' | 'Bar' | 'Busser';
   active: number;
   location_id: number;
   source: 'manual' | 'square';
@@ -163,6 +196,7 @@ export type CalcRow = {
   tips_after_fees_cents: number;
   kitchen_pool_cents: number;
   bar_pool_cents: number;
+  busser_pool_cents: number;
   foh_pool_cents: number;
   voided: number;
   created_at: number;
@@ -177,6 +211,7 @@ export type DistRow = {
   foh_share_cents: number;
   bar_pool_share_cents: number;
   kitchen_share_cents: number;
+  busser_share_cents: number;
   total_cents: number;
 };
 

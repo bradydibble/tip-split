@@ -45,9 +45,10 @@
   }
 
   const c = $derived(data.calc);
-  const fohDists   = $derived(data.distributions.filter(d => d.role === 'FOH'));
-  const barDists   = $derived(data.distributions.filter(d => d.role === 'Bar'));
-  const kitDists   = $derived(data.distributions.filter(d => d.role === 'Kitchen'));
+  const fohDists    = $derived(data.distributions.filter(d => d.role === 'FOH'));
+  const barDists    = $derived(data.distributions.filter(d => d.role === 'Bar'));
+  const kitDists    = $derived(data.distributions.filter(d => d.role === 'Kitchen'));
+  const busserDists = $derived(data.distributions.filter(d => d.role === 'Busser'));
 </script>
 
 <div class="page" style="padding-top:0;">
@@ -72,6 +73,9 @@
       <p class="label">Pool Breakdown</p>
       <div class="row muted"><span>Kitchen Pool ({(c.kitchen_pct * 100).toFixed(0)}%)</span><span class="money">${formatCents(c.kitchen_pool_cents)}</span></div>
       <div class="row"><span>After Kitchen Pool</span><span class="money">${formatCents(c.tips_after_fees_cents - c.kitchen_pool_cents)}</span></div>
+      {#if c.busser_pool_cents > 0}
+        <div class="row muted"><span>Busser Pool ({busserDists.length} × ${formatCents(c.busser_pool_cents / busserDists.length)})</span><span class="money">−${formatCents(c.busser_pool_cents)}</span></div>
+      {/if}
       <div class="row muted"><span>Liquor Sales</span><span class="money">${formatCents(c.liquor_sales_cents)}</span></div>
       <div class="row muted"><span>Bar Pool ({(c.bar_liquor_pct * 100).toFixed(0)}% of liquor)</span><span class="money">${formatCents(c.bar_pool_cents)}</span></div>
       <div class="row total"><span>FOH Pool</span><span class="money">${formatCents(c.foh_pool_cents)}</span></div>
@@ -111,6 +115,18 @@
       <div class="card">
         <p class="label">Kitchen — ${formatCents(c.kitchen_pool_cents)} ÷ {kitDists.length}</p>
         {#each kitDists as d}
+          <div class="row">
+            <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
+            <span class="money amt">${formatCents(d.total_cents)}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if busserDists.length > 0}
+      <div class="card">
+        <p class="label">Bussers — ${formatCents(c.busser_pool_cents)} ({busserDists.length} × ${formatCents(c.busser_pool_cents / busserDists.length)})</p>
+        {#each busserDists as d}
           <div class="row">
             <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
             <span class="money amt">${formatCents(d.total_cents)}</span>

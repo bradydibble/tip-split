@@ -25,6 +25,9 @@
     if (c.bar_pool_cents > 0) {
       lines.push(`Bar Pool:        $${formatCents(c.bar_pool_cents)}`);
     }
+    if (c.busser_pool_cents > 0) {
+      lines.push(`Busser Pool:     $${formatCents(c.busser_pool_cents)}`);
+    }
     lines.push('');
     for (const d of sorted) {
       lines.push(`${d.name} (${d.role}): $${formatCents(d.total_cents)}`);
@@ -77,6 +80,12 @@
         <div class="sum-row dim">
           <span>Bar Pool</span>
           <span class="money">${formatCents(c.bar_pool_cents)}</span>
+        </div>
+      {/if}
+      {#if c.busser_pool_cents > 0}
+        <div class="sum-row dim">
+          <span>Busser Pool</span>
+          <span class="money">${formatCents(c.busser_pool_cents)}</span>
         </div>
       {/if}
     </section>
