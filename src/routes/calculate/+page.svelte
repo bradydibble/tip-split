@@ -25,7 +25,7 @@
   let showAddForm = $state(false);
   let addingStaff = $state(false);
   let newName = $state('');
-  let newRole = $state<'FOH' | 'Bar' | 'Kitchen'>('FOH');
+  let newRole = $state<'FOH' | 'Bar' | 'Kitchen' | 'Busser'>('FOH');
   let addError = $state('');
 
   // Detect duplicate names to show ID badges
@@ -33,17 +33,18 @@
     staff.reduce((acc, s) => { acc[s.name] = (acc[s.name] ?? 0) + 1; return acc; }, {} as Record<string, number>)
   );
 
-  type RoleGroup = { label: string; role: 'FOH' | 'Bar' | 'Kitchen' };
+  type RoleGroup = { label: string; role: 'FOH' | 'Bar' | 'Kitchen' | 'Busser' };
   const ROLE_GROUPS: RoleGroup[] = [
     { label: 'FOH', role: 'FOH' },
     { label: 'Bar', role: 'Bar' },
     { label: 'Kitchen', role: 'Kitchen' },
+    { label: 'Busser', role: 'Busser' },
   ];
 
   const staffByRole = $derived(
     Object.fromEntries(
       ROLE_GROUPS.map(g => [g.role, staff.filter(s => s.role === g.role)])
-    ) as Record<'FOH' | 'Bar' | 'Kitchen', StaffRow[]>
+    ) as Record<'FOH' | 'Bar' | 'Kitchen' | 'Busser', StaffRow[]>
   );
 </script>
 
