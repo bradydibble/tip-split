@@ -2,6 +2,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { fail, redirect } from '@sveltejs/kit';
 import db from '$lib/server/db';
 import { getSettings } from '$lib/server/auth';
+import { isValidTimeZone, DEFAULT_TIMEZONE } from '$lib/business-date';
 
 export const load: PageServerLoad = ({ locals }) => {
   if (!locals.user) redirect(303, '/');
@@ -33,12 +34,17 @@ export const actions: Actions = {
     if (kitchenPct + barLiquorPct > 100)
       return fail(400, { error: 'Kitchen % and bar liquor % cannot exceed 100% combined' });
 
+    const timezone = String(fd.get('timezone') ?? DEFAULT_TIMEZONE);
+    if (!isValidTimeZone(timezone))
+      return fail(400, { error: 'Invalid timezone' });
+
     const updates: [string, string][] = [
       ['cc_fee_rate',                  String(ccFeeRate)],
       ['kitchen_pct',                  String(kitchenPct)],
       ['bar_liquor_pct',               String(barLiquorPct)],
       ['busser_rate',                  String(busserRate)],
       ['lunch_cutoff',                 String(fd.get('lunch_cutoff') ?? '15:00')],
+      ['timezone',                     timezone],
       ['restaurant_name',              String(fd.get('restaurant_name') ?? '')],
       ['google_sheets_spreadsheet_id', String(fd.get('google_sheets_spreadsheet_id') ?? '')],
       ['google_sheets_sheet_name',     String(fd.get('google_sheets_sheet_name') ?? '')],

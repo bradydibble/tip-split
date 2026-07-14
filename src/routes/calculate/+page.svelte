@@ -9,6 +9,8 @@
   let shift = $state(data.defaultShift);
   let date = $state(data.today);
 
+  const SHIFTS = ['Lunch', 'Dinner'] as const;
+
   // Live staff list — starts from server data, updated when new person is added
   let staff = $state<StaffRow[]>(data.staff);
 
@@ -78,7 +80,7 @@
         <div>
           <label class="label">Shift</label>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
-            {#each ['Lunch', 'Dinner'] as s}
+            {#each SHIFTS as s}
               <button type="button"
                 onclick={() => shift = s}
                 style="
