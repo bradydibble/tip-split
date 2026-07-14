@@ -4,6 +4,17 @@
 
   let { data, form }: { data: PageData; form: ActionData } = $props();
   let saving = $state(false);
+
+  // Common US restaurant timezones. Business day rolls over at 3 AM local time.
+  const TIMEZONES = [
+    { id: 'America/Los_Angeles', label: 'Pacific (Los Angeles)' },
+    { id: 'America/Denver',      label: 'Mountain (Denver)' },
+    { id: 'America/Phoenix',     label: 'Arizona (no DST)' },
+    { id: 'America/Chicago',     label: 'Central (Chicago)' },
+    { id: 'America/New_York',    label: 'Eastern (New York)' },
+    { id: 'America/Anchorage',   label: 'Alaska (Anchorage)' },
+    { id: 'Pacific/Honolulu',    label: 'Hawaii (Honolulu)' },
+  ];
 </script>
 
 <div class="page" style="padding-top:0;">
@@ -47,7 +58,16 @@
         </label>
 
         <label class="field">
-          <span>Lunch Cutoff (Pacific, 24h)</span>
+          <span>Timezone</span>
+          <select class="input" name="timezone">
+            {#each TIMEZONES as tz}
+              <option value={tz.id} selected={tz.id === (data.settings.timezone ?? 'America/Los_Angeles')}>{tz.label}</option>
+            {/each}
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Lunch Cutoff (local, 24h)</span>
           <input class="input" type="time" name="lunch_cutoff"
             value={data.settings.lunch_cutoff ?? '15:00'} />
         </label>
