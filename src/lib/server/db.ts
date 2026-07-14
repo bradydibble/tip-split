@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'fs';
 import { dirname } from 'path';
 import bcrypt from 'bcryptjs';
+import { DEFAULT_TIMEZONE } from '../business-date';
 
 const dbPath = process.env.DATABASE_PATH ?? './data/tipsplit.db';
 
@@ -144,6 +145,7 @@ for (const [key, value] of [
   ['bar_liquor_pct',               '10'],
   ['busser_rate',                  '20'],
   ['lunch_cutoff',                 '15:00'],
+  ['timezone',                     DEFAULT_TIMEZONE],
   ['restaurant_name',              'My Restaurant'],
   ['google_sheets_spreadsheet_id', ''],
   ['google_sheets_sheet_name',     'Tip History'],

@@ -3,6 +3,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import db from '$lib/server/db';
 import { getSettings } from '$lib/server/auth';
 import { calculate, dollarsToCents } from '$lib/calculator';
+import { businessDate, defaultShift, DEFAULT_TIMEZONE } from '$lib/business-date';
 import type { StaffRow } from '$lib/server/db';
 
 export const load: PageServerLoad = ({ locals }) => {
@@ -13,21 +14,14 @@ export const load: PageServerLoad = ({ locals }) => {
   ).all() as StaffRow[];
 
   const settings = getSettings();
-  const today = new Date().toISOString().split('T')[0];
-  const [cutoffH, cutoffM] = (settings.lunch_cutoff ?? '15:00').split(':').map(Number);
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Los_Angeles',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date());
-  const localHour   = parseInt(parts.find(p => p.type === 'hour')!.value,   10);
-  const localMinute = parseInt(parts.find(p => p.type === 'minute')!.value, 10);
-  const defaultShift = localHour > cutoffH || (localHour === cutoffH && localMinute >= cutoffM)
-    ? 'Dinner'
-    : 'Lunch';
+  const timeZone = settings.timezone ?? DEFAULT_TIMEZONE;
+  const now = new Date();
+  // Business day, not calendar day: late-night close-outs stay on the prior
+  // date until 3 AM local time (see $lib/business-date).
+  const today = businessDate(now, timeZone);
+  const shift = defaultShift(now, timeZone, settings.lunch_cutoff ?? '15:00');
 
-  return { staff, settings, today, defaultShift, user: locals.user };
+  return { staff, settings, today, defaultShift: shift, user: locals.user };
 };
 
 export const actions: Actions = {
