@@ -79,6 +79,20 @@
         </label>
       </div>
 
+      <!-- Pay period -->
+      <div class="card">
+        <p class="label">Pay Period</p>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.75rem;">
+          Pay periods are 14 business days starting on a Sunday. The anchor
+          sets the first Sunday; changing it re-anchors every period.
+        </p>
+        <label class="field">
+          <span>Anchor (a Sunday)</span>
+          <input class="input" type="date" name="pay_period_anchor"
+            value={data.settings.pay_period_anchor ?? '2026-08-23'} required />
+        </label>
+      </div>
+
       <!-- Google Sheets -->
       <div class="card">
         <p class="label">Google Sheets Export</p>
@@ -111,6 +125,7 @@
     <div style="margin-top:1rem;display:flex;flex-direction:column;gap:0.75rem;">
       <a href="/settings/staff" class="btn btn-secondary">Manage Staff Roster</a>
       <a href="/settings/users" class="btn btn-secondary">Manage Users & PINs</a>
+      <a href="/admin/tips" class="btn btn-secondary">Pay Period Tips</a>
     </div>
   </div>
 </div>

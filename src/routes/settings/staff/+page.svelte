@@ -6,11 +6,6 @@
   let adding = $state(false);
   let newName = $state('');
   let newRole = $state<'FOH' | 'Kitchen' | 'Bar'>('FOH');
-
-  // Detect names shared by multiple staff to show ID badges
-  const nameCounts = $derived(
-    data.staff.reduce((acc, s) => { acc[s.name] = (acc[s.name] ?? 0) + 1; return acc; }, {} as Record<string, number>)
-  );
 </script>
 
 <div class="page" style="padding-top:0;">
@@ -57,9 +52,8 @@
               <div style="display:flex;justify-content:space-between;align-items:center;">
                 <div style="display:flex;align-items:center;gap:0.4rem;">
                   <span style="font-size:1rem;{!person.active ? 'color:var(--muted);text-decoration:line-through;' : ''}">{person.name}</span>
-                  {#if nameCounts[person.name] > 1}
-                    <span style="font-size:0.7rem;color:var(--muted);background:var(--bg);
-                                  border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.35rem;">#{person.id}</span>
+                  {#if person.staff_code}
+                    <span class="badge" title="Staff ID — stable, never reused">{person.staff_code}</span>
                   {/if}
                 </div>
                 <div style="display:flex;gap:0.5rem;align-items:center;">
@@ -78,6 +72,9 @@
                   </form>
                 </div>
               </div>
+              {#if form && 'removeError' in form}
+                <p class="error-msg" style="font-size:0.75rem;margin-top:0.25rem;">{(form as {removeError: string}).removeError}</p>
+              {/if}
               <!-- Role change -->
               <form method="POST" action="?/changeRole" use:enhance
                 style="margin-top:0.35rem;display:flex;align-items:center;gap:0.5rem;">

@@ -3,6 +3,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import db from '$lib/server/db';
 import { getSettings } from '$lib/server/auth';
 import { isValidTimeZone, DEFAULT_TIMEZONE } from '$lib/business-date';
+import { isValidDateStr, isSunday, DEFAULT_PAY_PERIOD_ANCHOR } from '$lib/pay-period';
 
 export const load: PageServerLoad = ({ locals }) => {
   if (!locals.user) redirect(303, '/');
@@ -38,6 +39,12 @@ export const actions: Actions = {
     if (!isValidTimeZone(timezone))
       return fail(400, { error: 'Invalid timezone' });
 
+    // Pay period anchor: the first Sunday of the lattice. Must be a real
+    // calendar Sunday — a wrong anchor silently shifts every payroll period.
+    const anchor = String(fd.get('pay_period_anchor') ?? DEFAULT_PAY_PERIOD_ANCHOR);
+    if (!isValidDateStr(anchor) || !isSunday(anchor))
+      return fail(400, { error: 'Pay period anchor must be a Sunday (YYYY-MM-DD)' });
+
     const updates: [string, string][] = [
       ['cc_fee_rate',                  String(ccFeeRate)],
       ['kitchen_pct',                  String(kitchenPct)],
@@ -48,6 +55,7 @@ export const actions: Actions = {
       ['restaurant_name',              String(fd.get('restaurant_name') ?? '')],
       ['google_sheets_spreadsheet_id', String(fd.get('google_sheets_spreadsheet_id') ?? '')],
       ['google_sheets_sheet_name',     String(fd.get('google_sheets_sheet_name') ?? '')],
+      ['pay_period_anchor',            anchor],
     ];
 
     const upsert = db.prepare(

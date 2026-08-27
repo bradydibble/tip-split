@@ -1,0 +1,17 @@
+.git
+node_modules
+build
+.env
+.env.*
+data
+coverage
+.vite
+.opencode
+.svelte-kit
+docs
+cj.txt
+resp.txt
+sql
+*.db
+*.db-shm
+*.db-wal

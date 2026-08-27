@@ -4,6 +4,7 @@ import db from '$lib/server/db';
 import { getSettings } from '$lib/server/auth';
 import { appendToSheet } from '$lib/server/sheets';
 import { formatCents } from '$lib/calculator';
+import { sanitizeCsvField } from '$lib/server/pay-period-report';
 import type { CalcRow, DistRow, ExportLogRow } from '$lib/server/db';
 
 export const POST: RequestHandler = async ({ request, locals }) => {
@@ -40,8 +41,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
   // Columns: Date, Shift, Type, Calc ID,
   //          Gross Tips, CC Fee Rate, CC Fees, Net Tips,
   //          Kitchen %, Kitchen Pool, Liquor Sales, Bar Liquor %, Bar Pool, FOH Pool,
-  //          Name, Role, FOH Share, Bar Share, Kitchen Share, Total,
+  //          Name, Role, FOH Share, Bar Share, Kitchen Share, Busser Share, Total,
   //          Staff ID, Exported At, Export ID
+  //
+  // Names pass through sanitizeCsvField: a name starting with =, +, -, or @
+  // would become a live formula in the spreadsheet (CSV injection).
 
   const summaryRow: (string | number)[] = [
     calc.date, calc.shift, 'summary', calc.id,
@@ -55,19 +59,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     `${(calc.bar_liquor_pct * 100).toFixed(0)}%`,
     formatCents(calc.bar_pool_cents),
     formatCents(calc.foh_pool_cents),
-    '', '', '', '', '', '',
+    '', '', '', '', '', '', '',
     '', exportedAt, Number(exportId),
   ];
 
   const staffRows: (string | number)[][] = dists.map(d => [
     calc.date, calc.shift, 'staff', calc.id,
     '', '', '', '', '', '', '', '', '', '',
-    d.name, d.role,
+    sanitizeCsvField(d.name), d.role,
     formatCents(d.foh_share_cents),
     formatCents(d.bar_pool_share_cents),
     formatCents(d.kitchen_share_cents),
+    formatCents(d.busser_share_cents),
     formatCents(d.total_cents),
-    d.staff_id ?? '', exportedAt, Number(exportId),
+    d.staff_code ?? '', exportedAt, Number(exportId),
   ]);
 
   try {

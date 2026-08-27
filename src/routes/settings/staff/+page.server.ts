@@ -1,11 +1,12 @@
 import type { Actions, PageServerLoad } from './$types';
-import { fail, redirect } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import db from '$lib/server/db';
 import type { StaffRow } from '$lib/server/db';
+import { requireManager } from '$lib/server/auth';
+import { nextStaffCode } from '$lib/server/staff-code';
 
 export const load: PageServerLoad = ({ locals }) => {
-  if (!locals.user) redirect(303, '/');
-  if (locals.user.role !== 'manager') redirect(303, '/calculate');
+  requireManager(locals);
 
   const staff = db.prepare(
     'SELECT * FROM staff WHERE location_id = 1 ORDER BY active DESC, role, name'
@@ -25,8 +26,14 @@ export const actions: Actions = {
     if (!name) return fail(400, { addError: 'Name is required' });
     if (!['FOH', 'Kitchen', 'Bar', 'Busser'].includes(role)) return fail(400, { addError: 'Invalid role' });
 
-    db.prepare('INSERT INTO staff (name, role) VALUES (?, ?)').run(name, role);
-    return {};
+    // Code is claimed inside the insert transaction: if the insert fails,
+    // the counter rolls back and no code is lost.
+    const { lastInsertRowid } = db.transaction(() => {
+      const code = nextStaffCode();
+      return db.prepare('INSERT INTO staff (name, role, staff_code) VALUES (?, ?, ?)').run(name, role, code);
+    })();
+
+    return { addedId: Number(lastInsertRowid) };
   },
 
   toggle: async ({ request, locals }) => {
@@ -44,6 +51,20 @@ export const actions: Actions = {
     if (!locals.user || locals.user.role !== 'manager') return fail(403);
 
     const id = String((await request.formData()).get('id') ?? '');
+    const row = db.prepare('SELECT id, name, staff_code FROM staff WHERE id = ?').get(id) as
+      | { id: number; name: string; staff_code: string | null }
+      | undefined;
+    if (!row) return fail(404);
+
+    // A staff member with tip history is payroll history — deleting them
+    // would orphan distributions and burn a code. Deactivate instead.
+    const dists = db.prepare(
+      'SELECT COUNT(*) AS n FROM tip_distributions WHERE staff_id = ?'
+    ).get(id) as { n: number };
+    if (dists.n > 0) {
+      return fail(400, { removeError: `${row.name} has tip history and can't be removed. Deactivate them instead.` });
+    }
+
     db.prepare('DELETE FROM staff WHERE id = ?').run(id);
     return {};
   },

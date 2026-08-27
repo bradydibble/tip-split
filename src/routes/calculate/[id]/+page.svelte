@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { formatCents } from '$lib/calculator';
+  import type { DistRow } from '$lib/server/db';
 
   let { data }: { data: PageData } = $props();
 
@@ -10,8 +11,21 @@
 
   const lastExport = $derived(exportLog.length > 0 ? exportLog[0] : null);
 
+  // Adjustment modal state
+  let showAdjustmentModal = $state(false);
+  let selectedStaffId = $state<number | null>(null);
+  let selectedAdjustment = $state<number | null>(null);
+  let adjustmentReason = $state('');
+
   function formatExportTime(unixSec: number): string {
     return new Date(unixSec * 1000).toLocaleString();
+  }
+
+  // Pre-adjustment "natural" share for a distribution row:
+  // total_cents reflects post-adjustment; reversing adjustment_cents
+  // yields the calculator's original split.
+  function originalBase(d: { total_cents: number; adjustment_cents: number }): number {
+    return d.total_cents - d.adjustment_cents;
   }
 
   async function exportToSheets() {
@@ -45,6 +59,39 @@
   }
 
   const c = $derived(data.calc);
+
+function openAdjustmentModal(staffId: number) {
+  selectedStaffId = staffId;
+  selectedAdjustment = null;
+  adjustmentReason = '';
+  showAdjustmentModal = true;
+}
+
+async function applyAdjustment() {
+  if (!selectedStaffId || selectedAdjustment === null) return;
+  const formData = new FormData();
+  formData.append('staffId', String(selectedStaffId));
+  formData.append('adjustment', String(selectedAdjustment));
+  if (adjustmentReason) formData.append('reason', adjustmentReason);
+
+  const res = await fetch(`/calculate/${data.calc.id}?/adjust`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (res.ok) {
+    showAdjustmentModal = false;
+    // Reload the page to show updated totals
+    setTimeout(() => window.location.reload(), 100);
+  } else {
+    alert('Failed to apply adjustment');
+  }
+}
+
+function setSelectedAdjustment(adj: number) {
+  selectedAdjustment = adj;
+}
+
   const fohDists    = $derived(data.distributions.filter(d => d.role === 'FOH'));
   const barDists    = $derived(data.distributions.filter(d => d.role === 'Bar'));
   const kitDists    = $derived(data.distributions.filter(d => d.role === 'Kitchen'));
@@ -82,56 +129,62 @@
     </div>
 
     <!-- Per-person -->
+    {#snippet distRow(d: DistRow, showBreakdown: boolean)}
+      <div class="row">
+        <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
+        <div style="text-align:right;">
+          <div style="display:flex;align-items:center;gap:0.5rem;justify-content:flex-end;">
+            {#if d.adjustment_cents !== 0}
+              <span class="adj-original" title="Original share before adjustment">
+                ${formatCents(originalBase(d))}
+              </span>
+              <span class="adj-arrow">→</span>
+              <span class="adj-flag" title="Adjustment applied">
+                {d.adjustment_cents < 0 ? '−' : '+'}${formatCents(Math.abs(d.adjustment_cents))}
+              </span>
+            {/if}
+            <span class="money amt" class:adj-final={d.adjustment_cents !== 0}>${formatCents(d.total_cents)}</span>
+            {#if !c.voided && d.staff_id}
+              <button type="button" class="adj-btn" onclick={() => openAdjustmentModal(d.staff_id!)} aria-label="Adjust share">⚙</button>
+            {/if}
+          </div>
+          {#if showBreakdown && (d.foh_share_cents > 0 || d.bar_pool_share_cents > 0 || d.kitchen_share_cents > 0 || d.busser_share_cents > 0)}
+            <div class="pool-breakdown">
+              {#if d.foh_share_cents > 0}<span class="pb-chip pb-foh">FOH ${formatCents(d.foh_share_cents)}</span>{/if}
+              {#if d.bar_pool_share_cents > 0}<span class="pb-chip pb-bar">Bar ${formatCents(d.bar_pool_share_cents)}</span>{/if}
+              {#if d.kitchen_share_cents > 0}<span class="pb-chip pb-kit">Kit ${formatCents(d.kitchen_share_cents)}</span>{/if}
+              {#if d.busser_share_cents > 0}<span class="pb-chip pb-bus">Bus ${formatCents(d.busser_share_cents)}</span>{/if}
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/snippet}
+
     {#if fohDists.length > 0}
       <div class="card">
         <p class="label">FOH — ${formatCents(c.foh_pool_cents)} ÷ {fohDists.length + barDists.length}</p>
-        {#each fohDists as d}
-          <div class="row">
-            <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
-            <span class="money amt">${formatCents(d.total_cents)}</span>
-          </div>
-        {/each}
+        {#each fohDists as d}{@render distRow(d, false)}{/each}
       </div>
     {/if}
 
     {#if barDists.length > 0}
       <div class="card">
-        <p class="label">Bar</p>
-        {#each barDists as d}
-          <div class="row">
-            <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
-            <div style="text-align:right;">
-              <div class="money amt">${formatCents(d.total_cents)}</div>
-              <div style="font-size:0.75rem;color:var(--muted);">
-                ${formatCents(d.foh_share_cents)} FOH + ${formatCents(d.bar_pool_share_cents)} bar
-              </div>
-            </div>
-          </div>
-        {/each}
+        <p class="label">Bar — earns FOH pool share <em>and</em> bar pool share</p>
+        {#each barDists as d}{@render distRow(d, true)}{/each}
       </div>
     {/if}
 
     {#if kitDists.length > 0}
       <div class="card">
         <p class="label">Kitchen — ${formatCents(c.kitchen_pool_cents)} ÷ {kitDists.length}</p>
-        {#each kitDists as d}
-          <div class="row">
-            <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
-            <span class="money amt">${formatCents(d.total_cents)}</span>
-          </div>
-        {/each}
+        {#each kitDists as d}{@render distRow(d, false)}{/each}
       </div>
     {/if}
 
     {#if busserDists.length > 0}
       <div class="card">
         <p class="label">Bussers — ${formatCents(c.busser_pool_cents)} ({busserDists.length} × ${formatCents(c.busser_pool_cents / busserDists.length)})</p>
-        {#each busserDists as d}
-          <div class="row">
-            <span>{d.name}{#if d.staff_id}<span class="staff-id">#{d.staff_id}</span>{/if}</span>
-            <span class="money amt">${formatCents(d.total_cents)}</span>
-          </div>
-        {/each}
+        {#each busserDists as d}{@render distRow(d, false)}{/each}
       </div>
     {/if}
 
@@ -184,7 +237,40 @@
   </div>
 </div>
 
-<style>
+  <!-- Adjustment Modal -->
+  {#if showAdjustmentModal}
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;justify-content:center;align-items:center;">
+      <div style="background:var(--bg);padding:1.5rem;border-radius:12px;max-width:400px;width:90%;
+                  box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+        <h3 style="margin:0 0 1rem 0;">Adjust Tips</h3>
+        <p style="font-size:0.9rem;margin-bottom:1rem;">
+          Select an adjustment to apply to this staff member. The withheld amount is redistributed to other staff in the same role (or downstream if they were alone in that role).
+        </p>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;margin-bottom:1rem;">
+          {#each [-20, -25, -40, -50] as adj}
+            <button
+              type="button"
+              class="btn btn-secondary"
+              style="font-size:0.9rem;padding:0.5rem;{selectedAdjustment === adj ? 'border-color:var(--primary);font-weight:700;' : ''}"
+              onclick={() => setSelectedAdjustment(adj)}
+            >
+              {adj}%
+            </button>
+          {/each}
+        </div>
+        <div style="margin-bottom:0.75rem;">
+          <label style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem;">Reason (optional)</label>
+          <input type="text" class="input" bind:value={adjustmentReason} style="width:100%;" placeholder="e.g., Late arrival" />
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <button type="button" class="btn btn-secondary" onclick={() => showAdjustmentModal = false} style="width:48%;">Cancel</button>
+          <button type="button" class="btn btn-primary" style="width:48%;" onclick={applyAdjustment} disabled={selectedAdjustment === null}>Apply</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <style>
   .row {
     display: flex;
     justify-content: space-between;
@@ -203,4 +289,52 @@
     margin-left: 0.3rem;
     font-weight: 400;
   }
+  .adj-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    cursor: pointer;
+    line-height: 1;
+  }
+  .adj-btn:active { color: var(--primary); border-color: var(--primary); }
+  .adj-flag {
+    font-size: 0.7rem;
+    color: var(--warning, #c88);
+    white-space: nowrap;
+  }
+  .adj-original {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--muted);
+    white-space: nowrap;
+  }
+  .adj-arrow {
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  .adj-final { font-weight: 800; }
+  .pool-breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    justify-content: flex-end;
+    margin-top: 0.25rem;
+  }
+  .pb-chip {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: var(--bg);
+  }
+  .pb-foh { border-color: #4a9; color: #4a9; }
+  .pb-bar { border-color: #c84; color: #c84; }
+  .pb-kit { border-color: #69c; color: #69c; }
+  .pb-bus { border-color: #c4c; color: #c4c; }
 </style>
