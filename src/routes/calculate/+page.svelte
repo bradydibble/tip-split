@@ -17,10 +17,45 @@
   // Staff checked state — all active staff included by default
   let included = $state<Set<number>>(new Set());
 
+  // Per-shift effective role for each selected staff (defaults to the
+  // staff's roster role). Stored as plain strings — the <select> emits
+  // strings and the server validates the enum.
+  let staffEffectiveRoles = $state<Map<number, string>>(new Map());
+
+  function setRole(id: number, role: string) {
+    const next = new Map(staffEffectiveRoles);
+    next.set(id, role);
+    staffEffectiveRoles = next;
+  }
+
   function toggleStaff(id: number) {
-    const next = new Set(included);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    included = next;
+    const nextSet = new Set(included);
+    if (nextSet.has(id)) {
+      nextSet.delete(id);
+      const nextMap = new Map(staffEffectiveRoles);
+      nextMap.delete(id);
+      staffEffectiveRoles = nextMap;
+    } else {
+      nextSet.add(id);
+      const nextMap = new Map(staffEffectiveRoles);
+      const person = staff.find(s => s.id === id);
+      if (person) nextMap.set(id, person.role);
+      staffEffectiveRoles = nextMap;
+    }
+    included = nextSet;
+  }
+
+  function selectAll() {
+    const nextSet = new Set<number>();
+    const nextMap = new Map<number, string>();
+    for (const s of staff) { nextSet.add(s.id); nextMap.set(s.id, s.role); }
+    included = nextSet;
+    staffEffectiveRoles = nextMap;
+  }
+
+  function deselectAll() {
+    included = new Set();
+    staffEffectiveRoles = new Map();
   }
 
   // Quick-add staff
@@ -43,9 +78,16 @@
     { label: 'Busser', role: 'Busser' },
   ];
 
+  // Group staff by the role they will PERFORM THIS SHIFT — defaults to
+  // their roster role until the user picks otherwise via the dropdown.
+  // As the dropdown changes, the person visually moves to the new
+  // role's section (live regroup).
+  const effectiveRoleOf = (s: StaffRow): string =>
+    staffEffectiveRoles.get(s.id) ?? s.role;
+
   const staffByRole = $derived(
     Object.fromEntries(
-      ROLE_GROUPS.map(g => [g.role, staff.filter(s => s.role === g.role)])
+      ROLE_GROUPS.map(g => [g.role, staff.filter(s => effectiveRoleOf(s) === g.role)])
     ) as Record<'FOH' | 'Bar' | 'Kitchen' | 'Busser', StaffRow[]>
   );
 </script>
@@ -126,10 +168,10 @@
         <p class="label" style="margin:0;">Staff Working This Shift</p>
         {#if staff.length > 0}
           <div style="display:flex;gap:0.25rem;align-items:center;font-size:0.75rem;">
-            <button type="button" onclick={() => { included = new Set(staff.map(s => s.id)); }}
+            <button type="button" onclick={selectAll}
               style="background:none;border:none;color:var(--primary);padding:0;cursor:pointer;font-size:0.75rem;">Select All</button>
             <span style="color:var(--muted);">·</span>
-            <button type="button" onclick={() => { included = new Set(); }}
+            <button type="button" onclick={deselectAll}
               style="background:none;border:none;color:var(--primary);padding:0;cursor:pointer;font-size:0.75rem;">Deselect All</button>
           </div>
         {/if}
@@ -157,9 +199,14 @@
                   location_id: 1,
                   source: 'manual',
                   square_team_member_id: null,
+                  staff_code: null,
                 };
                 staff = [...staff, newPerson].sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
-                included = new Set([...included, newPerson.id]);
+                const nextSet = new Set([...included, newPerson.id]);
+                const nextMap = new Map(staffEffectiveRoles);
+                nextMap.set(newPerson.id, newRole);
+                included = nextSet;
+                staffEffectiveRoles = nextMap;
                 newName = '';
                 showAddForm = false;
               } else if (result.type === 'failure') {
@@ -198,20 +245,32 @@
         {#each ROLE_GROUPS as { label, role }}
           {#if staffByRole[role].length > 0}
             <p style="font-size:0.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;
-                      letter-spacing:0.05em;margin:0.75rem 0 0.5rem;">{label}</p>
+                      letter-spacing:0.05em;margin:0.75rem 0 0.5rem;">
+              {label} <span style="color:var(--text);font-weight:700;">· {staffByRole[role].length}</span>
+            </p>
             {#each staffByRole[role] as person}
               {@const checked = included.has(person.id)}
-              <label style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0;
-                            border-bottom:1px solid var(--border);cursor:pointer;">
-                <input type="checkbox" name="included" value={person.id}
-                  checked={checked} onchange={() => toggleStaff(person.id)}
-                  style="width:20px;height:20px;accent-color:var(--primary);cursor:pointer;" />
-                <span style="font-size:1rem;">{person.name}</span>
-                {#if nameCounts[person.name] > 1}
-                  <span style="font-size:0.7rem;color:var(--muted);background:var(--bg);
-                                border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.35rem;">#{person.id}</span>
-                {/if}
-              </label>
+<label style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0;
+              border-bottom:1px solid var(--border);cursor:pointer;">
+  <input type="checkbox" name="included" value={person.id}
+    checked={checked} onchange={() => toggleStaff(person.id)}
+    style="width:20px;height:20px;accent-color:var(--primary);cursor:pointer;" />
+  <span style="font-size:1rem;">{person.name}</span>
+  {#if nameCounts[person.name] > 1 && person.staff_code}
+    <span class="badge">{person.staff_code}</span>
+  {/if}
+  <select class="role-selector"
+    value={staffEffectiveRoles.get(person.id) ?? person.role}
+    onchange={(e) => setRole(person.id, e.currentTarget.value)}
+    style="padding:0.2rem 0.5rem;font-size:0.8rem;width:auto;max-width:100px;">
+    {#each ['FOH', 'Kitchen', 'Bar', 'Busser'] as r}
+      <option value={r}>{r}</option>
+    {/each}
+  </select>
+  {#if checked}
+    <input type="hidden" name="role" value={staffEffectiveRoles.get(person.id) ?? person.role} />
+  {/if}
+</label>
             {/each}
           {/if}
         {/each}

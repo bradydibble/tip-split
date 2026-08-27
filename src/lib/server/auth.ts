@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { redirect } from '@sveltejs/kit';
 import { randomBytes } from 'crypto';
 import db from './db';
 import type { UserRow } from './db';
@@ -37,6 +38,16 @@ export function getSession(sessionId: string): { id: number; role: 'shift_lead' 
 
 export function deleteSession(sessionId: string): void {
   db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+}
+
+/**
+ * Manager gate for loads, actions, and +server.ts endpoints. Layout-level
+ * guards do NOT cover +server.ts handlers, so every admin entry point calls
+ * this directly.
+ */
+export function requireManager(locals: { user: { id: number; role: 'shift_lead' | 'manager' } | null }): void {
+  if (!locals.user) redirect(303, '/');
+  if (locals.user.role !== 'manager') redirect(303, '/calculate');
 }
 
 export function getSettings(): Record<string, string> {

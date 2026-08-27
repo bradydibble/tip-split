@@ -119,10 +119,10 @@ export function calculate(input: CalculatorInput, rng: () => number = Math.rando
   const kitchenPoolCents        = toDollars(Math.round(tipsAfterFeesCents * config.kitchenPct));
   const remainingAfterKitchenCents = tipsAfterFeesCents - kitchenPoolCents;
 
-  const fohStaff     = staff.filter(s => s.role === 'FOH');
-  const kitchenStaff = staff.filter(s => s.role === 'Kitchen');
-  const barStaff     = staff.filter(s => s.role === 'Bar');
-  const busserStaff  = staff.filter(s => s.role === 'Busser');
+const fohStaff     = staff.filter(s => s.role === 'FOH');
+const kitchenStaff = staff.filter(s => s.role === 'Kitchen');
+const barStaff     = staff.filter(s => s.role === 'Bar');
+const busserStaff  = staff.filter(s => s.role === 'Busser');
 
   // Bussers take a fixed per-person cut from the post-kitchen remainder, before
   // the bar/FOH split. Bussers do NOT share the FOH pool. The rate is a whole
@@ -142,22 +142,22 @@ export function calculate(input: CalculatorInput, rng: () => number = Math.rando
     const kitchenDollars = distributePoolDollars(kitchenPoolCents, kitchenStaff.length,        rng);
     const barDollars     = distributePoolDollars(barPoolCents,     barStaff.length,            rng);
 
-    for (let i = 0; i < fohStaff.length; i++) {
-      const cents = fohDollars[i] * 100;
-      distributions.push({ staffId: fohStaff[i].id, name: fohStaff[i].name, role: 'FOH',
-        fohShareCents: cents, barPoolShareCents: 0, kitchenShareCents: 0, busserShareCents: 0, totalCents: cents });
-    }
-    for (let i = 0; i < barStaff.length; i++) {
-      const fohCents = fohDollars[fohStaff.length + i] * 100;
-      const barCents = barDollars[i] * 100;
-      distributions.push({ staffId: barStaff[i].id, name: barStaff[i].name, role: 'Bar',
-        fohShareCents: fohCents, barPoolShareCents: barCents, kitchenShareCents: 0, busserShareCents: 0, totalCents: fohCents + barCents });
-    }
-    for (let i = 0; i < kitchenStaff.length; i++) {
-      const cents = kitchenDollars[i] * 100;
-      distributions.push({ staffId: kitchenStaff[i].id, name: kitchenStaff[i].name, role: 'Kitchen',
-        fohShareCents: 0, barPoolShareCents: 0, kitchenShareCents: cents, busserShareCents: 0, totalCents: cents });
-    }
+for (let i = 0; i < fohStaff.length; i++) {
+    const cents = fohDollars[i] * 100;
+    distributions.push({ staffId: fohStaff[i].id, name: fohStaff[i].name, role: 'FOH',
+      fohShareCents: cents, barPoolShareCents: 0, kitchenShareCents: 0, busserShareCents: 0, totalCents: cents });
+  }
+for (let i = 0; i < barStaff.length; i++) {
+    const fohCents = fohDollars[fohStaff.length + i] * 100;
+    const barCents = barDollars[i] * 100;
+    distributions.push({ staffId: barStaff[i].id, name: barStaff[i].name, role: 'Bar',
+      fohShareCents: fohCents, barPoolShareCents: barCents, kitchenShareCents: 0, busserShareCents: 0, totalCents: fohCents + barCents });
+  }
+for (let i = 0; i < kitchenStaff.length; i++) {
+    const cents = kitchenDollars[i] * 100;
+    distributions.push({ staffId: kitchenStaff[i].id, name: kitchenStaff[i].name, role: 'Kitchen',
+      fohShareCents: 0, barPoolShareCents: 0, kitchenShareCents: cents, busserShareCents: 0, totalCents: cents });
+  }
   } else {
     const fohCents     = distributePoolCents(fohPoolCents,     fohPoolParticipants.length);
     const kitchenCents = distributePoolCents(kitchenPoolCents, kitchenStaff.length);

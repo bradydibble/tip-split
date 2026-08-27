@@ -11,6 +11,7 @@ Owner: Brady Dibble | Status: Phase 1 Built | Last Updated: April 2026
 TipSplit is a SvelteKit progressive web app that replaces the manual post-shift tip calculation process at a restaurant. A shift lead opens the app, confirms who worked, enters gross tips and liquor sales, and hits Calculate. Whole-dollar per-person amounts appear in seconds. One tap exports to Google Sheets. A shareable card is designed to screenshot and paste into a group chat.
 
 **Phase 1** (built): Manual entry, configurable split logic, Google Sheets export, PWA install.
+**Phase 1.5** (spec'd Aug 2026): Staff identifiers + pay-period tip reporting for payroll (see "Phase 1.5" section).
 **Phase 2** (scoped): Square API integration — pull tips and liquor sales automatically, auto-assign shifts from clock-in times.
 
 ---
@@ -175,8 +176,96 @@ Phase 2 adds a `SQUARE_ACCESS_TOKEN` env var and a Square category → "Liquor" 
 
 ---
 
-## Open Questions
+## Phase 1.5: Staff Identifiers + Pay Period Reporting (Aug 2026)
 
+Status: spec'd and advisory-reviewed (claude, gafton, design review). Supersedes the first draft of this section.
+
+### Purpose
+
+Two needs drive this phase:
+
+1. **Square linkability** — every staff member needs a stable, human-readable unique identifier in TipSplit that can be mapped 1:1 to a Square team member when the Phase 2 Square integration lands.
+2. **Payroll** — managers need to see each staff member's total tips aggregated across a pay period, and drill down to the individual shifts those tips came from. The view must be easy to read at a glance and exportable for payroll.
+
+### Requirements
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| PI-1 | Every staff member gets a stable, human-readable, never-reused unique ID (`staff_code`: `TS-0001`, `TS-0002`, …) assigned atomically at creation from a monotonic counter (`staff_code_seq` setting). Padding grows past 9999 (`TS-10000`); codes are uppercase, immutable, not manager-editable | P0 |
+| PI-2 | Staff ID visible in the roster (always), pay-period report, and drill-down. The calculate screen keeps the collision-only badge (disambiguation, not identity) but shows the code instead of the raw DB id | P0 |
+| PI-3 | `staff_code` is the TipSplit-side key for the Square team-member mapping (`square_team_member_id` holds the Square side; both on the `staff` row). `tip_distributions` snapshots `staff_code` alongside the existing `name`/`role` snapshot so history stays resolvable | P0 |
+| PI-4 | Hard-Remove of a staff member is blocked once they have any `tip_distributions` row (roster offers Deactivate instead). Prevents dangling staff ids and keeps payroll totals reconcilable | P0 |
+| PP-1 | New **Admin** section (manager-only) with a **Pay Period Tips** report. Every entry point enforces manager authz via a shared `requireManager()` helper: report load, drill-down load, CSV endpoint (layout guards do not cover `+server.ts`) | P0 |
+| PP-2 | Pay period = **14 consecutive business dates** starting on a lattice Sunday. Lattice: a start `S` is on the lattice iff `S` is a Sunday and `(S − anchor) mod 14d == 0`, anchor = setting `pay_period_anchor` (default `2026-08-23`, a Sunday; validated on save). Period 2026-08-23 → 2026-09-05 is the worked example. Membership is by business date (3 AM rollover): a shift closed Sunday 2:59 AM books to business date Saturday and belongs to the period ending that Saturday | P0 |
+| PP-3 | Default view: the **current** pay period (the one containing today's business date). One period shown at a time. The current period is labeled "in progress · day N of 14" so a half period is never mistaken for final | P0 |
+| PP-4 | Navigate backward to the first period overlapping June 2026 (start 2026-05-31) and forward to the last period starting in the **current year** (dynamic; for 2026 that is 2026-12-27, whose period ends 2027-01-09). Future periods show as "Upcoming" with a real empty state. April/May 2026 calcs remain visible in History but are out of the payroll range (documented) | P0 |
+| PP-5 | Report aggregates `tip_distributions.total_cents` per staff member across non-voided calculations whose business date is in `[start, start + 14d)` (half-open — never BETWEEN). Live query, no materialized totals | P0 |
+| PP-6 | Report rows: Name (current roster name, fallback historical), Staff ID, Role, Shifts worked (`COUNT(DISTINCT calculation_id)`), Total. Sorted total desc, then name, then staff_code (total order). Grand total computed by a second SQL `SUM` over the same filter (never re-summed in the UI). Footer: "N of M active staff have tips this period" (omission detection) | P0 |
+| PP-7 | Drill down from any staff row to a per-shift list: date, shift (Lunch/Dinner), pool breakdown (FOH/Bar/Kitchen/Busser — only non-zero pools shown), shift total, link to the calculation. Drill-down shows the historical recorded name per shift | P0 |
+| PP-8 | Voided calculations excluded by default; "Show voided" toggle (consistent with History). The summary strip always shows "N voided excluded" even when the toggle is off (audit signal) | P1 |
+| PP-9 | CSV export: `GET /admin/tips/[periodStart]/export.csv`, manager-gated, filename `tips-<start>_<end>.csv`, columns: Period Start, Period End, Staff ID, Name, Role, Shifts, Total (dollars, 2dp). CSV **always excludes voided** regardless of the UI toggle. Trailing metadata rows: generated-at (Pacific), voided-excluded count. All fields sanitized against formula injection (leading `=`, `+`, `-`, `@`, tab, CR get a `'` prefix) | P1 |
+| PP-10 | Security fixes shipped with this phase: `void` action becomes manager-only (any logged-in user could currently void a calc — the payroll report is built on void integrity); Google Sheets export sanitizes staff names (same formula-injection hole) and gains the missing Busser share column | P0 |
+
+### Pay period math (implementation contract)
+
+- **Pure calendar arithmetic only.** All period math operates on `YYYY-MM-DD` strings via UTC calendar-day arithmetic (`Date.UTC` + `setUTCDate`, the same discipline as `businessDate()`). Never construct a local `Date` and never add `14 * 86400000` ms — 2026-11-01 is both a lattice start and the PDT→PST transition, and ms math silently shifts every period from mid-November on.
+- The lattice is timezone-independent. Only "which period is current" needs a zone: `businessDate(now, settings.timezone)` (default `America/Los_Angeles` = Pacific per deployment spec).
+- `periodStartFor(date, anchor)` is a pure function of its arguments (no hidden `new Date()`).
+- Off-lattice period in a URL → 303 redirect to the containing period. Out-of-range → 303 to the nearest range end. Invalid staff code → 404.
+
+### Data model changes
+
+- `staff.staff_code TEXT` (nullable at column level; enforced non-null in the insert path) + `CREATE UNIQUE INDEX idx_staff_code`.
+- `tip_distributions.staff_code TEXT` (nullable snapshot; backfilled from the join).
+- Migration (order matters — must run **after** the Busser table-recreate, which must also copy the new column):
+  1. `ALTER TABLE staff ADD COLUMN staff_code TEXT` (nullable — SQLite cannot add NOT NULL/UNIQUE columns).
+  2. `ALTER TABLE tip_distributions ADD COLUMN staff_code TEXT`.
+  3. Backfill `staff.staff_code = 'TS-' || substr('0000' || id, -4)` where null (idempotent).
+  4. `CREATE UNIQUE INDEX IF NOT EXISTS idx_staff_code ON staff(staff_code)`.
+  5. Backfill `tip_distributions.staff_code` from the staff join where resolvable.
+  6. Indexes: `idx_td_calc(calculation_id)`, `idx_td_staff(staff_id)`, `idx_tc_date(date, voided)`, partial unique `idx_td_calc_staff ON tip_distributions(calculation_id, staff_id) WHERE staff_id IS NOT NULL`.
+  7. Counter self-heal: if `staff_code_seq` is missing or non-integer, re-derive from `max(staff_code)`.
+- The existing try/catch ALTER loop must only swallow `duplicate column name` — any other error is a real migration failure and must throw (today it would boot cleanly with a silently missing column).
+- Counter increment is one statement inside the insert transaction: `UPDATE settings SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'staff_code_seq' RETURNING value`.
+
+### Routes
+
+| Route | Purpose |
+|-------|---------|
+| `/admin/tips` | 303 → `/admin/tips/[currentPeriodStart]` (canonical URL carries the period) |
+| `/admin/tips/[periodStart]` | Report page (validates lattice + range, redirects otherwise) |
+| `/admin/tips/[periodStart]/export.csv` | CSV download (manager-gated `+server.ts`) |
+| `/admin/tips/[periodStart]/staff/[staffCode]` | Drill-down (manager-gated; code validated, 404 if unknown) |
+
+Nav: "Pay Period Tips" link on the Settings page (`.btn-secondary`, alongside Staff Roster / Users) — not in the calculate header (hot path, 480px).
+
+### Design contract (480px, dark, existing tokens)
+
+- New tokens in `+layout.svelte`: `--text-xs 0.75rem`, `--text-2xs 0.7rem`, `--row-y 0.75rem`, `--badge-radius 9999px`, `--row-active var(--surface2)`; pattern classes `.table-row` (2-line grid row), `.badge` (+ `.badge-current` green tint / `.badge-upcoming` neutral fill / `.badge-past` neutral outline), `.stats` (3-column summary strip with dividers).
+- Rows are two-line card rows, not a `<table>`: line 1 = Name + ID badge … total (right, `.money`); line 2 = `Role · N shifts` … `›` chevron. Whole row tappable (`<a>`, `:active` feedback), 44px+ targets.
+- Period nav: `‹ label ›` with 44px arrow buttons (disabled `opacity:0.4` at range ends, aria-labels), centered tappable label → bottom sheet listing all periods (label + total, current marked), "N of M" position text + thin progress bar.
+- Money hierarchy: amber (`--primary`) is the single hero number per screen — grand total and drill-down period total only. Row totals `--text`, sub-lines `--muted`. `tabular-nums` on all figures.
+- Summary strip: Period Total / Shifts / Staff Paid (`8 of 12`) in one card.
+- Sticky bottom bar: grand total + CSV button (the reconciled number stays visible while scrolling).
+- Empty states: Upcoming → "No shifts yet in this period."; staff with $0 → row shown, `$0.00` in muted (zero is data, not error); no staff → "No staff worked this period."
+
+### Testing contract
+
+- `pay-period.test.ts`: lattice with hand-computed literals — anchor (`2026-08-23 → 2026-08-23`), `2026-09-05 → 2026-08-23`, `2026-09-06 → 2026-09-06`, June boundary (`2026-06-13 → 2026-05-31`, `2026-06-14 → 2026-06-14`), **DST** (`2026-10-31 → 2026-10-18`, `2026-11-01 → 2026-11-01`, `2026-11-02 → 2026-11-01`), year boundary (`2026-12-31 → 2026-12-27`, `2027-01-01 → 2026-12-27`); generated 2026 range contains `2026-11-01` and `2026-11-15`; status + day-of-period with injected `now`.
+- `pay-period-report.test.ts` (temp SQLite): boundary inclusion (`S−1` out, `S` in, `S+13` in, `S+14` out), voided excluded by default / included on toggle / **never in CSV**, renamed staff (current name in report, historical in drill-down), duplicate names (two rows, distinct codes), NULL `staff_id` (excluded from per-staff rows, surfaced as a count), grand total equals a hand-computed literal; `staff_code` sequence (create 3 → delete middle → next is `TS-0004`), counter self-heal (missing row, corrupt value), UNIQUE violation rolls back cleanly.
+- CSV serializer unit tests: `=CMD(...)` escaped, comma quoted, UTF-8 survives.
+- `requireManager` with fake locals: manager passes, shift_lead redirected, anonymous redirected.
+- No tautologies: no expected values derived from the implementation under test; no re-testing `toFixed`/`Intl`.
+
+### Out of scope (Phase 2 / later)
+
+- Square sync of the mapping, auto clock-in assignment, per-shift Square tip pull.
+- Multi-location, per-pool payroll columns, taxes/garnishments.
+- `PRAGMA user_version` migration framework (noted for Phase 2; the hand-ordered migration above is the last one written this way).
+
+### Open Questions
+
+- **Pay period anchor:** `2026-08-23` per verbal spec, now a validated setting (`pay_period_anchor`). Confirm the restaurant's actual pay period start day — the whole feature is wrong by a week if it isn't a Sunday-start 14-day period. (Owner: Brady)
 - **Square catalog:** Does the production Square account have a dedicated Liquor/Bar category, or do items need to be reorganized before Phase 2? (Owner: Brady, Before Phase 2)
 - **Offline caching:** After Phase 1 usage, assess whether a service worker cache is needed or always-connected is sufficient. (Owner: Brady, End of Phase 1)
 - **CC fee by payment type:** Phase 3 candidate — different rates for Visa vs Amex vs Debit. Payment brand is available from Square (`card_details.card.card_brand`).

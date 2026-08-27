@@ -4,7 +4,12 @@ import db from '$lib/server/db';
 import { getSettings } from '$lib/server/auth';
 import { calculate, dollarsToCents } from '$lib/calculator';
 import { businessDate, defaultShift, DEFAULT_TIMEZONE } from '$lib/business-date';
+import { isValidDateStr, addDays } from '$lib/pay-period';
+import { nextStaffCode } from '$lib/server/staff-code';
 import type { StaffRow } from '$lib/server/db';
+
+const ALLOWED_ROLES = ['FOH', 'Kitchen', 'Bar', 'Busser'] as const;
+type EffectiveRole = typeof ALLOWED_ROLES[number];
 
 export const load: PageServerLoad = ({ locals }) => {
   if (!locals.user) redirect(303, '/');
@@ -34,10 +39,26 @@ export const actions: Actions = {
     const grossRaw    = String(fd.get('gross_tips') ?? '');
     const liquorRaw   = String(fd.get('liquor_sales') ?? '0');
     const includedIds = new Set(fd.getAll('included').map(String));
+    // Phase 2 — move-between-roles: one role per selected staff, emitted
+    // as hidden inputs in the SAME DOM order as the `included` checkboxes
+    // (which mirrors `staff` ordered by role, name below).
+    const rolePairs   = fd.getAll('role').map(v => String(v));
 
     if (!date) return fail(400, { error: 'Date is required' });
     if (!['Lunch', 'Dinner'].includes(shift)) return fail(400, { error: 'Select a shift' });
     if (!grossRaw) return fail(400, { error: 'Enter gross tips' });
+    if (rolePairs.length !== includedIds.size)
+      return fail(400, { error: 'Role required for each selected staff' });
+    if (rolePairs.some(r => !(ALLOWED_ROLES as readonly string[]).includes(r)))
+      return fail(400, { error: 'Invalid role' });
+
+    const settings = getSettings();
+    const timeZone = settings.timezone ?? DEFAULT_TIMEZONE;
+    if (!isValidDateStr(date)) return fail(400, { error: 'Invalid date' });
+    if (date < '2000-01-01' || date > '2099-12-31')
+      return fail(400, { error: 'Date must be between 2000 and 2099' });
+    if (date > addDays(businessDate(new Date(), timeZone), 90))
+      return fail(400, { error: 'Date cannot be more than 90 days in the future' });
 
     const grossTipsCents   = dollarsToCents(grossRaw);
     const liquorSalesCents = dollarsToCents(liquorRaw || '0');
@@ -53,7 +74,12 @@ export const actions: Actions = {
     const staff = allStaff.filter(s => includedIds.has(String(s.id)));
     if (staff.length === 0) return fail(400, { error: 'Select at least one staff member' });
 
-    const settings = getSettings();
+    // Pair each included staff with the per-shift role from the form. Order
+    // is preserved: hidden `role` inputs render next to their checkbox.
+    const staffWithRoles = staff.map((s, i) => ({
+      id: s.id, name: s.name, role: rolePairs[i] as EffectiveRole,
+    }));
+
     const config = {
       ccFeeRate:       parseFloat(settings.cc_fee_rate)    / 100,
       kitchenPct:      parseFloat(settings.kitchen_pct)    / 100,
@@ -64,7 +90,7 @@ export const actions: Actions = {
     const result = calculate({
       grossTipsCents,
       liquorSalesCents,
-      staff: staff.map(s => ({ id: s.id, name: s.name, role: s.role })),
+      staff: staffWithRoles,
       config,
     });
 
@@ -78,9 +104,9 @@ export const actions: Actions = {
 
     const insertDist = db.prepare(`
       INSERT INTO tip_distributions
-        (calculation_id, staff_id, name, role, foh_share_cents,
+        (calculation_id, staff_id, staff_code, name, role, foh_share_cents,
          bar_pool_share_cents, kitchen_share_cents, busser_share_cents, total_cents)
-      VALUES (?,?,?,?,?,?,?,?,?)
+      VALUES (?, ?, (SELECT staff_code FROM staff WHERE id = ?), ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const calcId = db.transaction(() => {
@@ -92,9 +118,14 @@ export const actions: Actions = {
       );
       for (const d of result.distributions) {
         insertDist.run(
-          lastInsertRowid, d.staffId, d.name, d.role,
+          lastInsertRowid, d.staffId, d.staffId, d.name, d.role,
           d.fohShareCents, d.barPoolShareCents, d.kitchenShareCents, d.busserShareCents, d.totalCents
         );
+        // Phase 2 — persist the per-shift role on shift_assignments so the
+        // adjustment audit can resolve "what role did this person perform".
+        db.prepare(
+          'INSERT INTO shift_assignments (staff_id, date, shift, effective_role) VALUES (?, ?, ?, ?)'
+        ).run(d.staffId, date, shift, d.role);
       }
       return lastInsertRowid;
     })();
@@ -110,11 +141,13 @@ export const actions: Actions = {
     const role = String(fd.get('role') ?? '');
 
     if (!name) return fail(400, { addError: 'Name is required' });
-    if (!['FOH', 'Kitchen', 'Bar', 'Busser'].includes(role)) return fail(400, { addError: 'Invalid role' });
+    if (!ALLOWED_ROLES.includes(role as EffectiveRole)) return fail(400, { addError: 'Invalid role' });
 
-    const { lastInsertRowid } = db.prepare(
-      'INSERT INTO staff (name, role) VALUES (?, ?)'
-    ).run(name, role);
+    // Code claimed inside the insert transaction (rolls back on failure).
+    const { lastInsertRowid } = db.transaction(() => {
+      const code = nextStaffCode();
+      return db.prepare('INSERT INTO staff (name, role, staff_code) VALUES (?, ?, ?)').run(name, role, code);
+    })();
 
     return { addedId: Number(lastInsertRowid), addedName: name };
   },
