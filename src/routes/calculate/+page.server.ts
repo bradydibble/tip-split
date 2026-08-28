@@ -7,9 +7,7 @@ import { businessDate, defaultShift, DEFAULT_TIMEZONE } from '$lib/business-date
 import { isValidDateStr, addDays } from '$lib/pay-period';
 import { nextStaffCode } from '$lib/server/staff-code';
 import type { StaffRow } from '$lib/server/db';
-
-const ALLOWED_ROLES = ['FOH', 'Kitchen', 'Bar', 'Busser'] as const;
-type EffectiveRole = typeof ALLOWED_ROLES[number];
+import { readRoleAssignments, STAFF_ROLES, type StaffRole } from '$lib/staff-role-selection';
 
 export const load: PageServerLoad = ({ locals }) => {
   if (!locals.user) redirect(303, '/');
@@ -39,17 +37,14 @@ export const actions: Actions = {
     const grossRaw    = String(fd.get('gross_tips') ?? '');
     const liquorRaw   = String(fd.get('liquor_sales') ?? '0');
     const includedIds = new Set(fd.getAll('included').map(String));
-    // Phase 2 — move-between-roles: one role per selected staff, emitted
-    // as hidden inputs in the SAME DOM order as the `included` checkboxes
-    // (which mirrors `staff` ordered by role, name below).
-    const rolePairs   = fd.getAll('role').map(v => String(v));
+    const roleAssignments = readRoleAssignments(fd, includedIds);
 
     if (!date) return fail(400, { error: 'Date is required' });
     if (!['Lunch', 'Dinner'].includes(shift)) return fail(400, { error: 'Select a shift' });
     if (!grossRaw) return fail(400, { error: 'Enter gross tips' });
-    if (rolePairs.length !== includedIds.size)
+    if (!roleAssignments.ok && roleAssignments.error === 'missing')
       return fail(400, { error: 'Role required for each selected staff' });
-    if (rolePairs.some(r => !(ALLOWED_ROLES as readonly string[]).includes(r)))
+    if (!roleAssignments.ok)
       return fail(400, { error: 'Invalid role' });
 
     const settings = getSettings();
@@ -73,11 +68,15 @@ export const actions: Actions = {
 
     const staff = allStaff.filter(s => includedIds.has(String(s.id)));
     if (staff.length === 0) return fail(400, { error: 'Select at least one staff member' });
+    if (staff.length !== includedIds.size)
+      return fail(400, { error: 'One or more selected staff members are unavailable' });
 
-    // Pair each included staff with the per-shift role from the form. Order
-    // is preserved: hidden `role` inputs render next to their checkbox.
-    const staffWithRoles = staff.map((s, i) => ({
-      id: s.id, name: s.name, role: rolePairs[i] as EffectiveRole,
+    // Each role is addressed by staff ID, so database and visual ordering
+    // cannot move a role assignment to another person.
+    const staffWithRoles = staff.map((s) => ({
+      id: s.id,
+      name: s.name,
+      role: roleAssignments.roles.get(String(s.id)) as StaffRole,
     }));
 
     const config = {
@@ -141,7 +140,7 @@ export const actions: Actions = {
     const role = String(fd.get('role') ?? '');
 
     if (!name) return fail(400, { addError: 'Name is required' });
-    if (!ALLOWED_ROLES.includes(role as EffectiveRole)) return fail(400, { addError: 'Invalid role' });
+    if (!STAFF_ROLES.includes(role as StaffRole)) return fail(400, { addError: 'Invalid role' });
 
     // Code claimed inside the insert transaction (rolls back on failure).
     const { lastInsertRowid } = db.transaction(() => {

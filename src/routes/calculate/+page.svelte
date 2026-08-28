@@ -2,6 +2,7 @@
   import { enhance } from '$app/forms';
   import type { PageData, ActionData } from './$types';
   import type { StaffRow } from '$lib/server/db';
+  import { roleFieldName, STAFF_ROLES, type StaffRole } from '$lib/staff-role-selection';
 
   let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -18,11 +19,10 @@
   let included = $state<Set<number>>(new Set());
 
   // Per-shift effective role for each selected staff (defaults to the
-  // staff's roster role). Stored as plain strings — the <select> emits
-  // strings and the server validates the enum.
-  let staffEffectiveRoles = $state<Map<number, string>>(new Map());
+  // staff's roster role). The server validates the submitted enum again.
+  let staffEffectiveRoles = $state<Map<number, StaffRole>>(new Map());
 
-  function setRole(id: number, role: string) {
+  function setRole(id: number, role: StaffRole) {
     const next = new Map(staffEffectiveRoles);
     next.set(id, role);
     staffEffectiveRoles = next;
@@ -39,7 +39,7 @@
       nextSet.add(id);
       const nextMap = new Map(staffEffectiveRoles);
       const person = staff.find(s => s.id === id);
-      if (person) nextMap.set(id, person.role);
+      if (person && !nextMap.has(id)) nextMap.set(id, person.role);
       staffEffectiveRoles = nextMap;
     }
     included = nextSet;
@@ -47,7 +47,7 @@
 
   function selectAll() {
     const nextSet = new Set<number>();
-    const nextMap = new Map<number, string>();
+    const nextMap = new Map<number, StaffRole>();
     for (const s of staff) { nextSet.add(s.id); nextMap.set(s.id, s.role); }
     included = nextSet;
     staffEffectiveRoles = nextMap;
@@ -62,7 +62,7 @@
   let showAddForm = $state(false);
   let addingStaff = $state(false);
   let newName = $state('');
-  let newRole = $state<'FOH' | 'Bar' | 'Kitchen' | 'Busser'>('FOH');
+  let newRole = $state<StaffRole>('FOH');
   let addError = $state('');
 
   // Detect duplicate names to show ID badges
@@ -70,7 +70,7 @@
     staff.reduce((acc, s) => { acc[s.name] = (acc[s.name] ?? 0) + 1; return acc; }, {} as Record<string, number>)
   );
 
-  type RoleGroup = { label: string; role: 'FOH' | 'Bar' | 'Kitchen' | 'Busser' };
+  type RoleGroup = { label: string; role: StaffRole };
   const ROLE_GROUPS: RoleGroup[] = [
     { label: 'FOH', role: 'FOH' },
     { label: 'Bar', role: 'Bar' },
@@ -82,7 +82,7 @@
   // their roster role until the user picks otherwise via the dropdown.
   // As the dropdown changes, the person visually moves to the new
   // role's section (live regroup).
-  const effectiveRoleOf = (s: StaffRow): string =>
+  const effectiveRoleOf = (s: StaffRow): StaffRole =>
     staffEffectiveRoles.get(s.id) ?? s.role;
 
   const staffByRole = $derived(
@@ -163,9 +163,9 @@
     </div>
 
     <!-- Staff -->
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-        <p class="label" style="margin:0;">Staff Working This Shift</p>
+    <div class="card staff-card">
+      <div class="staff-toolbar">
+        <p class="label" style="margin:0;">Staff working this shift</p>
         {#if staff.length > 0}
           <div style="display:flex;gap:0.25rem;align-items:center;font-size:0.75rem;">
             <button type="button" onclick={selectAll}
@@ -242,38 +242,46 @@
           No staff yet. Use "+ Add Person" above to add someone.
         </p>
       {:else}
-        {#each ROLE_GROUPS as { label, role }}
-          {#if staffByRole[role].length > 0}
-            <p style="font-size:0.75rem;font-weight:600;color:var(--muted);text-transform:uppercase;
-                      letter-spacing:0.05em;margin:0.75rem 0 0.5rem;">
-              {label} <span style="color:var(--text);font-weight:700;">· {staffByRole[role].length}</span>
-            </p>
-            {#each staffByRole[role] as person}
-              {@const checked = included.has(person.id)}
-<label style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0;
-              border-bottom:1px solid var(--border);cursor:pointer;">
-  <input type="checkbox" name="included" value={person.id}
-    checked={checked} onchange={() => toggleStaff(person.id)}
-    style="width:20px;height:20px;accent-color:var(--primary);cursor:pointer;" />
-  <span style="font-size:1rem;">{person.name}</span>
-  {#if nameCounts[person.name] > 1 && person.staff_code}
-    <span class="badge">{person.staff_code}</span>
-  {/if}
-  <select class="role-selector"
-    value={staffEffectiveRoles.get(person.id) ?? person.role}
-    onchange={(e) => setRole(person.id, e.currentTarget.value)}
-    style="padding:0.2rem 0.5rem;font-size:0.8rem;width:auto;max-width:100px;">
-    {#each ['FOH', 'Kitchen', 'Bar', 'Busser'] as r}
-      <option value={r}>{r}</option>
-    {/each}
-  </select>
-  {#if checked}
-    <input type="hidden" name="role" value={staffEffectiveRoles.get(person.id) ?? person.role} />
-  {/if}
-</label>
-            {/each}
-          {/if}
-        {/each}
+        <div class="role-groups">
+          {#each ROLE_GROUPS as { label, role }}
+            {#if staffByRole[role].length > 0}
+              <section class="role-group" data-role={role}>
+                <div class="role-group-header">
+                  <h3>{label}</h3>
+                  <span class="role-count">{staffByRole[role].length}</span>
+                </div>
+                <div class="role-list">
+                  {#each staffByRole[role] as person (person.id)}
+                    {@const checked = included.has(person.id)}
+                    <div class:staff-row-included={checked} class="staff-row">
+                      <label class="staff-identity">
+                        <input type="checkbox" name="included" value={person.id}
+                          checked={checked} onchange={() => toggleStaff(person.id)}
+                          aria-label={`Include ${person.name}`}/>
+                        <span class="staff-name">{person.name}</span>
+                        {#if nameCounts[person.name] > 1 && person.staff_code}
+                          <span class="badge">{person.staff_code}</span>
+                        {/if}
+                      </label>
+                      <select class="role-selector"
+                        aria-label={`Role for ${person.name}`}
+                        value={staffEffectiveRoles.get(person.id) ?? person.role}
+                        onchange={(e) => setRole(person.id, e.currentTarget.value as StaffRole)}>
+                        {#each STAFF_ROLES as availableRole}
+                          <option value={availableRole}>{availableRole}</option>
+                        {/each}
+                      </select>
+                      {#if checked}
+                        <input type="hidden" name={roleFieldName(person.id)}
+                          value={staffEffectiveRoles.get(person.id) ?? person.role} />
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </section>
+            {/if}
+          {/each}
+        </div>
       {/if}
     </div>
 
@@ -286,3 +294,137 @@
     </button>
   </form>
 </div>
+
+<style>
+  .staff-card {
+    padding: 1rem;
+  }
+
+  .staff-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.65rem 0.85rem;
+    margin-bottom: 1rem;
+  }
+
+  .role-groups {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .role-group {
+    --role-accent: var(--primary);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--role-accent);
+    border-radius: 10px;
+    background: var(--surface2);
+  }
+
+  .role-group[data-role='Bar'] { --role-accent: #38bdf8; }
+  .role-group[data-role='Kitchen'] { --role-accent: #34d399; }
+  .role-group[data-role='Busser'] { --role-accent: #c084fc; }
+
+  .role-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 42px;
+    padding: 0.65rem 0.75rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .role-group-header h3 {
+    color: var(--text);
+    font-size: 1rem;
+    font-weight: 800;
+    letter-spacing: 0.015em;
+  }
+
+  .role-count {
+    display: grid;
+    place-items: center;
+    min-width: 1.65rem;
+    height: 1.65rem;
+    padding: 0 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--role-accent);
+    background: var(--surface);
+    font-size: 0.78rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .staff-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 52px;
+    padding: 0.55rem 0.65rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .staff-row:last-child {
+    border-bottom: 0;
+  }
+
+  .staff-row-included {
+    background: var(--surface2);
+  }
+
+  .staff-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+    flex: 1;
+    cursor: pointer;
+  }
+
+  .staff-identity input {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    accent-color: var(--primary);
+    cursor: pointer;
+  }
+
+  .staff-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 0.98rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .role-selector {
+    width: 96px;
+    flex: 0 0 auto;
+    padding: 0.42rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--text);
+    background: var(--bg);
+    font-size: 0.8rem;
+    font-weight: 650;
+  }
+
+  .role-selector:focus-visible,
+  .staff-identity input:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 380px) {
+    .staff-card { padding: 0.85rem; }
+    .staff-row { padding-inline: 0.55rem; }
+    .role-selector { width: 88px; font-size: 0.75rem; }
+  }
+</style>
