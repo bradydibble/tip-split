@@ -29,7 +29,7 @@ Runs as a single rootless Podman container on any Linux host. No external servic
 - [Git](https://git-scm.com/)
 - Port 4000 accessible from your reverse proxy
 
-The steps below are the portable self-hosted path. Brady's production environment has a separate GCP deployment command documented later in this file.
+There are two paths: **manual** (do everything yourself) or **CI/CD** (GitHub Actions handles builds and deploys after a one-time server setup). If you're using CI/CD, skip to that section — the steps below are for the manual path only.
 
 ### Manual path
 
@@ -97,19 +97,83 @@ docker compose -f deploy/compose.yaml up -d
 
 ---
 
-## Brady's Production Deployment
+## CI/CD Auto-Deploy (GitHub Actions)
 
-Production is a GCE VM named `tipsplit-vm` in Brady's personal GCP project `homelab-personal-502823`. It is not Cloud Run and it is not on cairn-02. GitHub Actions runs tests only; merging `main` does not deploy automatically.
+Every merge to `main` automatically builds and deploys to your server. The workflow uses [tailscale/github-action](https://github.com/tailscale/github-action) — the runner joins your Tailscale network ephemerally, deploys, then disappears. Your server needs no public IP and no open firewall ports.
 
-From any checkout, including a dirty feature branch, deploy the current `origin/main` with one command:
+### One-time server setup
+
+GitHub Actions handles cloning, building, writing `.env`, and restarting the service on every deploy. Before the first deploy you need to create the systemd service file and enable it — that's it.
+
+**On your server, run:**
 
 ```bash
-npm run deploy:gcp
+# Allow user services to run without an active login session
+sudo loginctl enable-linger $USER
+
+# Create the systemd service file
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/tipsplit.service << 'EOF'
+[Unit]
+Description=TipSplit App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+ExecStart=/usr/bin/podman run --rm --name tipsplit \
+  -p 4000:3000 \
+  -v tipsplit-data:/app/data \
+  --env-file %h/tipsplit/.env \
+  localhost/tipsplit:latest
+ExecStop=/usr/bin/podman stop -t 10 tipsplit
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Register and enable it (first deploy will start it)
+systemctl --user daemon-reload
+systemctl --user enable tipsplit.service
 ```
 
-The command fetches `origin/main` into a clean temporary worktree, builds and tags that exact commit in Cloud Build, resolves the immutable Artifact Registry digest, and deploys it to the VM through IAP. The VM-side step authenticates with its attached service account, creates an online SQLite backup, preserves runtime application settings, applies the required SELinux volume label, checks SQLite integrity and HTTPS health, and automatically rolls back the container if verification fails.
+That's all. Do not clone the repo or create `.env` manually — the workflow does both.
 
-Required local access: `gcloud` authenticated as `bradydibble@gmail.com` with access to the personal project. The production target is intentionally fixed in the script so an old homelab inventory cannot redirect a deployment.
+### Generate a deploy key
+
+```bash
+# On your local machine
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_tipsplit -N ""
+
+# Add the public key to the server
+cat ~/.ssh/id_ed25519_tipsplit.pub | ssh user@yourserver "cat >> ~/.ssh/authorized_keys"
+```
+
+### Add GitHub secrets
+
+Go to your repo → **Settings → Secrets and variables → Actions → Repository secrets** → **New repository secret**.
+
+| Secret | Value |
+|--------|-------|
+| `TAILSCALE_AUTHKEY` | From [Tailscale admin → Settings → Auth Keys](https://login.tailscale.com/admin/settings/authkeys) — check **Ephemeral** |
+| `DEPLOY_KEY` | Contents of `~/.ssh/id_ed25519_tipsplit` (the private key) |
+| `DEPLOY_HOST` | Server's Tailscale IP |
+| `DEPLOY_USER` | SSH username on the server |
+| `ENV_FILE` | Full contents of your production `.env` (see `.env.example`) |
+
+The `ENV_FILE` secret replaces the manual `.env` file — the workflow copies it to the server on every deploy, so your config is always in sync with what GitHub holds.
+
+### After the first deploy
+
+```bash
+# SSH into your server and verify the service is running
+systemctl --user status tipsplit.service
+```
+
+Open the app, log in with your `INITIAL_MANAGER_PIN`, create permanent user accounts, then remove `INITIAL_MANAGER_PIN` from your `ENV_FILE` secret.
 
 ---
 

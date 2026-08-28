@@ -10,8 +10,7 @@
     "test:watch": "vitest",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lint": "eslint .",
-    "gen-icons": "node scripts/gen-icons.mjs",
-    "deploy:gcp": "bash scripts/deploy-gcp.sh"
+    "gen-icons": "node scripts/gen-icons.mjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",
