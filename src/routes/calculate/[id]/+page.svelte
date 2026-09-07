@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { PageData } from './$types';
+  import { enhance, applyAction } from '$app/forms';
   import { formatCents } from '$lib/calculator';
+  import { interpretActionResult } from '$lib/adjust-result';
   import type { DistRow } from '$lib/server/db';
 
   let { data }: { data: PageData } = $props();
@@ -16,6 +18,8 @@
   let selectedStaffId = $state<number | null>(null);
   let selectedAdjustment = $state<number | null>(null);
   let adjustmentReason = $state('');
+  let adjustError = $state('');
+  let adjusting = $state(false);
 
   function formatExportTime(unixSec: number): string {
     return new Date(unixSec * 1000).toLocaleString();
@@ -64,33 +68,34 @@ function openAdjustmentModal(staffId: number) {
   selectedStaffId = staffId;
   selectedAdjustment = null;
   adjustmentReason = '';
+  adjustError = '';
   showAdjustmentModal = true;
-}
-
-async function applyAdjustment() {
-  if (!selectedStaffId || selectedAdjustment === null) return;
-  const formData = new FormData();
-  formData.append('staffId', String(selectedStaffId));
-  formData.append('adjustment', String(selectedAdjustment));
-  if (adjustmentReason) formData.append('reason', adjustmentReason);
-
-  const res = await fetch(`/calculate/${data.calc.id}?/adjust`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (res.ok) {
-    showAdjustmentModal = false;
-    // Reload the page to show updated totals
-    setTimeout(() => window.location.reload(), 100);
-  } else {
-    alert('Failed to apply adjustment');
-  }
 }
 
 function setSelectedAdjustment(adj: number) {
   selectedAdjustment = adj;
+  adjustError = '';
 }
+
+// The action answers HTTP 200 for rejections as well as successes, so the
+// outcome has to come from `result.type` — see $lib/adjust-result.
+const submitAdjustment = () => {
+  adjusting = true;
+  adjustError = '';
+  return async ({ result }: { result: import('@sveltejs/kit').ActionResult }) => {
+    adjusting = false;
+    const outcome = interpretActionResult(result);
+    if (outcome.kind === 'applied') {
+      showAdjustmentModal = false;
+      // Follows the action's 303 and re-runs `load`, refreshing the totals.
+      await applyAction(result);
+    } else {
+      // Keep the modal open so the message is read next to the choice
+      // that caused it.
+      adjustError = outcome.message;
+    }
+  };
+};
 
   const fohDists    = $derived(data.distributions.filter(d => d.role === 'FOH'));
   const barDists    = $derived(data.distributions.filter(d => d.role === 'Bar'));
@@ -246,26 +251,40 @@ function setSelectedAdjustment(adj: number) {
         <p style="font-size:0.9rem;margin-bottom:1rem;">
           Select an adjustment to apply to this staff member. The withheld amount is redistributed to other staff in the same role (or downstream if they were alone in that role).
         </p>
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem;margin-bottom:1rem;">
-          {#each [-20, -25, -40, -50] as adj}
-            <button
-              type="button"
-              class="btn btn-secondary"
-              style="font-size:0.9rem;padding:0.5rem;{selectedAdjustment === adj ? 'border-color:var(--primary);font-weight:700;' : ''}"
-              onclick={() => setSelectedAdjustment(adj)}
-            >
-              {adj}%
+        <form method="POST" action="?/adjust" use:enhance={submitAdjustment}>
+          <input type="hidden" name="staffId" value={selectedStaffId} />
+          <input type="hidden" name="adjustment" value={selectedAdjustment} />
+
+          <div class="pct-grid">
+            {#each [-20, -25, -40, -50] as adj}
+              <button
+                type="button"
+                class="pct-btn"
+                class:selected={selectedAdjustment === adj}
+                aria-pressed={selectedAdjustment === adj}
+                onclick={() => setSelectedAdjustment(adj)}
+              >
+                {adj}%
+              </button>
+            {/each}
+          </div>
+
+          <div style="margin-bottom:0.75rem;">
+            <label for="adj-reason" style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem;">Reason (optional)</label>
+            <input id="adj-reason" name="reason" type="text" class="input" bind:value={adjustmentReason} style="width:100%;" placeholder="e.g., Late arrival" />
+          </div>
+
+          {#if adjustError}
+            <p class="error-msg" role="alert">{adjustError}</p>
+          {/if}
+
+          <div style="display:flex;justify-content:space-between;">
+            <button type="button" class="btn btn-secondary" onclick={() => showAdjustmentModal = false} style="width:48%;" disabled={adjusting}>Cancel</button>
+            <button type="submit" class="btn btn-primary" style="width:48%;" disabled={selectedAdjustment === null || adjusting}>
+              {adjusting ? 'Applying…' : 'Apply'}
             </button>
-          {/each}
-        </div>
-        <div style="margin-bottom:0.75rem;">
-          <label style="display:block;font-size:0.8rem;color:var(--muted);margin-bottom:0.25rem;">Reason (optional)</label>
-          <input type="text" class="input" bind:value={adjustmentReason} style="width:100%;" placeholder="e.g., Late arrival" />
-        </div>
-        <div style="display:flex;justify-content:space-between;">
-          <button type="button" class="btn btn-secondary" onclick={() => showAdjustmentModal = false} style="width:48%;">Cancel</button>
-          <button type="button" class="btn btn-primary" style="width:48%;" onclick={applyAdjustment} disabled={selectedAdjustment === null}>Apply</button>
-        </div>
+          </div>
+        </form>
       </div>
     </div>
   {/if}
@@ -300,6 +319,34 @@ function setSelectedAdjustment(adj: number) {
     line-height: 1;
   }
   .adj-btn:active { color: var(--primary); border-color: var(--primary); }
+  .pct-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  /* The global `button { border: none }` reset zeroes border-width and
+     border-style, so a selected state expressed only as `border-color`
+     paints nothing. Declare the whole border here — transparent when
+     unselected so selecting does not shift the layout — and change the
+     fill too, which reads at a glance on a phone. */
+  .pct-btn {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1.5px solid transparent;
+    border-radius: var(--radius);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 0.95rem;
+    font-weight: 600;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .pct-btn.selected {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #000;
+    font-weight: 700;
+  }
   .adj-flag {
     font-size: 0.7rem;
     color: var(--warning, #c88);
