@@ -3,6 +3,7 @@ import { mkdirSync } from 'fs';
 import { dirname } from 'path';
 import bcrypt from 'bcryptjs';
 import { DEFAULT_TIMEZONE } from '../business-date';
+import { runMigrations } from './migrations';
 
 const dbPath = process.env.DATABASE_PATH ?? './data/tipsplit.db';
 
@@ -243,6 +244,10 @@ if (initialPin) {
   }
 }
 
+// Run numbered migrations (Square integration onward). Must come after the
+// bootstrap schema and seed data so migrations can extend existing tables.
+runMigrations(db);
+
 export type UserRow = {
   id: number;
   name: string | null;
@@ -260,6 +265,10 @@ export type StaffRow = {
   source: 'manual' | 'square';
   square_team_member_id: string | null;
   staff_code: string | null;
+  square_status: string | null;
+  square_last_synced_at: string | null;
+  default_tip_split_role: 'FOH' | 'BAR' | 'BUSSER' | 'KITCHEN' | 'EXCLUDED' | null;
+  role_mapping_state: 'MAPPED' | 'NEEDS_REVIEW' | 'EXCLUDED' | null;
 };
 
 export type CalcRow = {
@@ -303,6 +312,62 @@ export type ExportLogRow = {
   exported_at: number;
   exported_by: number | null;
   location_id: number;
+};
+
+export type SquareConnectionRow = {
+  location_id: string;
+  merchant_id: string;
+  merchant_name: string | null;
+  square_location_id: string;
+  square_location_name: string | null;
+  timezone: string;
+  currency: string | null;
+  api_version: string;
+  weekly_hours_json: string | null;
+  last_validation_at: string | null;
+  last_validation_ok: number;
+  last_roster_sync_at: string | null;
+  last_catalog_sync_at: string | null;
+  scope_failures_json: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ShiftReportRow = {
+  id: number;
+  location_id: string;
+  business_date: string;
+  shift_type: 'Lunch' | 'Dinner';
+  state: 'DRAFT' | 'READY_FOR_REVIEW' | 'FINALIZED' | 'VOIDED';
+  source: 'auto' | 'manual';
+  scheduled_instant_utc: string | null;
+  close_source: 'weekly_hours' | 'override';
+  close_override_id: number | null;
+  square_tips_cents: number;
+  square_liquor_sales_cents: number;
+  manual_tips_cents: number;
+  manual_liquor_cents: number;
+  latest_sync_run_id: number | null;
+  final_calculation_id: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ShiftReportAttendanceRow = {
+  id: number;
+  shift_report_id: number;
+  staff_id: number | null;
+  square_team_member_id: string;
+  square_scheduled_shift_id: string | null;
+  scheduled_job_id: string | null;
+  scheduled_job_title: string | null;
+  name_snapshot: string;
+  default_role: 'FOH' | 'BAR' | 'BUSSER' | 'KITCHEN' | 'EXCLUDED' | null;
+  selected_role: 'FOH' | 'BAR' | 'BUSSER' | 'KITCHEN' | 'EXCLUDED' | null;
+  role_confirmed: number;
+  confirmed_by: number | null;
+  confirmed_at: string | null;
+  inclusion_state: 'INCLUDED' | 'EXCLUDED' | 'NEEDS_REVIEW' | 'REMOVED';
 };
 
 export default db;
