@@ -74,6 +74,7 @@ Tips are calculated per shift (Lunch and Dinner are independent). The cutoff bet
 | SM-4 | Persist a default staff roster | P0 | 1 ✅ |
 | SM-5 | Pull active staff from Square team management | P1 | 2 |
 | SM-6 | Auto-assign shift based on clock-in time and configurable cutoff | P1 | 2 |
+| SM-7 | When a Square schedule is linked, the calculate screen defaults its staff list and selection to the people published as scheduled for the chosen business date + shift (reviewed shift-report attendance when present, else a live read-only scheduled-shift fetch; `GET /api/staffing`). Staff can still be removed (missed work) or added (covers) via the full-roster toggle or quick-add. Unlinked deployments keep the full-roster behavior | P1 | 2 ✅ |
 
 ### Tip Input
 
@@ -123,6 +124,7 @@ Tips are calculated per shift (Lunch and Dinner are independent). The cutoff bet
 | AA-2 | Two roles: shift_lead (calculate + history) and manager (+ settings + user mgmt) | P0 | 1 ✅ |
 | AA-3 | Manager creates and distributes PINs in person | P0 | 1 ✅ |
 | AA-4 | Session expires after 8 hours | P0 | 1 ✅ |
+| AA-5 | Percentage tip adjustments require sign-in only (shift lead or manager) — the person closing the shift is the person who needs to adjust. Voiding a calculation remains manager-only. Every adjustment is audited in `adjustment_logs` with the acting user | P0 | 1 ✅ |
 
 ---
 
