@@ -98,6 +98,7 @@
     <h1 style="font-size:1.5rem;font-weight:800;color:var(--primary);">TipSplit</h1>
     <div style="display:flex;gap:0.75rem;align-items:center;">
       <a href="/history" style="color:var(--muted);font-size:0.875rem;">History</a>
+      <a href="/reports" style="color:var(--muted);font-size:0.875rem;">Reports</a>
       {#if data.user?.role === 'manager'}
         <a href="/settings" style="color:var(--muted);font-size:0.875rem;">Settings</a>
       {/if}
@@ -200,6 +201,10 @@
                   source: 'manual',
                   square_team_member_id: null,
                   staff_code: null,
+                  square_status: null,
+                  square_last_synced_at: null,
+                  default_tip_split_role: null,
+                  role_mapping_state: null,
                 };
                 staff = [...staff, newPerson].sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
                 const nextSet = new Set([...included, newPerson.id]);

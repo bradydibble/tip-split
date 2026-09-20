@@ -1,10 +1,10 @@
-# Plan: Oh Vashon Square Read-Only Integration
+# Plan: Square Read-Only Integration
 
 Companion specification: [Square Read-Only Integration Specification](../square-readonly-integration-spec.md).
 
 ## Delivery outcome
 
-TipSplit can mirror active Oh Vashon staff from Square Team, build Lunch and Dinner drafts from the published Square schedule, populate Square tips and Cocktails/Liquors sales, require shift-lead role confirmation, and safely re-sync an unfinalized draft. It does not mutate Square.
+TipSplit can mirror active restaurant staff from Square Team, build Lunch and Dinner drafts from the published Square schedule, populate Square tips and Cocktails/Liquors sales, require shift-lead role confirmation, and safely re-sync an unfinalized draft. It does not mutate Square.
 
 ## Work order
 
