@@ -4,14 +4,14 @@ Status: implementation-ready specification, no Square mutations permitted.
 
 ## Purpose
 
-TipSplit will use Oh Vashon's production Square account as the read-only source for:
+TipSplit will use the connected restaurant's production Square account as the read-only source for:
 
 1. Active staff and their stable Square Team IDs.
 2. Published scheduled shifts and assigned jobs for a business date.
 3. Gross Square tips and liquor sales for Lunch and Dinner shift reports.
 4. A manager-initiated re-sync of an unfinalized report.
 
-The integration eliminates re-keying, but never eliminates human accountability. A shift lead must review the generated attendance and explicitly select or confirm each participant's TipSplit role before finalizing a split.
+The integration eliminates re-keying, but never eliminates human accountability. A shift lead must review the generated attendance and explicitly select or confirm each participant's TipSplit role before finalizing a split. The same schedule also defaults the calculate screen: when Square is linked, a new tip split starts from the people scheduled for the chosen business date + shift (served from reviewed shift-report attendance when present, otherwise a live read-only fetch), and the shift lead can still remove anyone (missed work) or add anyone (covers).
 
 ## Non-negotiable constraints
 
@@ -19,8 +19,8 @@ The integration eliminates re-keying, but never eliminates human accountability.
 - Square Team is the source of truth for active staff. TipSplit is a local operational mirror, not a competing roster.
 - Square scheduled shifts are the source for who was scheduled and the job they were scheduled to work. They do not prove actual attendance. TipSplit records the shift-lead-reviewed participant list as the final operational record.
 - The Square production access token, application ID, and application secret stay server-side. Never put them in browser code, form values, logs, test fixtures, exports, or commits.
-- The single Oh Vashon physical location is selected by its immutable Square `location_id`, never by display name. Persist the selection in settings after an explicit manager confirmation.
-- All business-date and scheduler calculations use the selected Square location's IANA timezone, currently expected to be `America/Los_Angeles`. Never use the server's timezone.
+- The restaurant's Square location is selected by its immutable Square `location_id`, never by display name. Persist the selection in settings after an explicit manager confirmation.
+- All business-date and scheduler calculations use the selected Square location's IANA timezone (application default `America/Los_Angeles`). Never use the server's timezone.
 - Existing manual entry remains available as an override. A generated report must show its Square values, manual adjustments, sync timestamp, and Square record counts separately.
 
 ## Square endpoints and minimum permissions
