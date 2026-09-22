@@ -57,8 +57,11 @@ export const actions: Actions = {
   },
 
   adjust: async ({ params, locals, request }) => {
-    if (!locals.user || locals.user.role !== 'manager')
-      return fail(403, { error: 'Manager access required' });
+    // Percentage adjustments are not manager-only: the shift lead closing
+    // out a shift is exactly the person who needs to apply one. Any
+    // signed-in user may adjust; every adjustment is fully audited in
+    // adjustment_logs with the acting user's id.
+    if (!locals.user) return fail(401, { error: 'Sign in to adjust' });
 
     const fd = await request.formData();
     const staffId = parseInt(String(fd.get('staffId') ?? ''), 10);
