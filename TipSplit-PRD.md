@@ -123,6 +123,7 @@ Tips are calculated per shift (Lunch and Dinner are independent). The cutoff bet
 | AA-2 | Two roles: shift_lead (calculate + history) and manager (+ settings + user mgmt) | P0 | 1 ✅ |
 | AA-3 | Manager creates and distributes PINs in person | P0 | 1 ✅ |
 | AA-4 | Session expires after 8 hours | P0 | 1 ✅ |
+| AA-5 | Percentage tip adjustments require sign-in only (shift lead or manager) — the person closing the shift is the person who needs to adjust. Voiding a calculation remains manager-only. Every adjustment is audited in `adjustment_logs` with the acting user | P0 | 1 ✅ |
 
 ---
 
