@@ -22,6 +22,114 @@
   // staff's roster role). The server validates the submitted enum again.
   let staffEffectiveRoles = $state<Map<number, StaffRole>>(new Map());
 
+  // ── Square staffing defaults ────────────────────────────────────────────
+  // When a Square schedule is linked, the list defaults to the people
+  // scheduled for the selected date + shift. Anyone can still be removed
+  // (missed work) or added (covers) — this only sets the default view and
+  // the default selection.
+
+  type StaffingSource =
+    | 'shift_report' | 'square_live' | 'not_configured'
+    | 'no_location' | 'no_schedule' | 'error';
+
+  type StaffingInfo = {
+    loading: boolean;
+    available: boolean;
+    source: StaffingSource;
+    staffedIds: Set<number>;
+    suggestedRoles: Map<number, StaffRole>;
+    notInRosterCount: number;
+  };
+
+  const NO_STAFFING: StaffingInfo = {
+    loading: false,
+    available: false,
+    source: 'not_configured',
+    staffedIds: new Set(),
+    suggestedRoles: new Map(),
+    notInRosterCount: 0,
+  };
+
+  let staffing = $state<StaffingInfo>(NO_STAFFING);
+  // Scheduled-only view hides the rest of the roster until asked for.
+  let showFullRoster = $state(false);
+  // People added mid-form via "+ Add Person" stay visible even in the
+  // scheduled-only view.
+  let manuallyAdded = $state<Set<number>>(new Set());
+
+  // Square's role-mapping vocabulary ('BAR') → this app's role values.
+  const SQUARE_ROLE_TO_APP: Record<string, StaffRole> = {
+    FOH: 'FOH',
+    BAR: 'Bar',
+    BUSSER: 'Busser',
+    KITCHEN: 'Kitchen',
+  };
+
+  function applyStaffing(res: {
+    available: boolean;
+    source: StaffingSource;
+    staffed: { staffId: number; suggestedRole: string | null }[];
+    notInRoster: unknown[];
+  }) {
+    const staffedIds = new Set<number>();
+    const suggestedRoles = new Map<number, StaffRole>();
+    for (const p of res.staffed) {
+      // Skip anyone the roster no longer knows (deleted mid-session).
+      if (!staff.some(s => s.id === p.staffId)) continue;
+      staffedIds.add(p.staffId);
+      const mapped = p.suggestedRole ? SQUARE_ROLE_TO_APP[p.suggestedRole] : undefined;
+      if (mapped) suggestedRoles.set(p.staffId, mapped);
+    }
+    staffing = {
+      loading: false,
+      available: res.available && staffedIds.size > 0,
+      source: res.source,
+      staffedIds,
+      suggestedRoles,
+      notInRosterCount: res.notInRoster?.length ?? 0,
+    };
+    manuallyAdded = new Set();
+    showFullRoster = false;
+
+    // No staffing defaults for this window — same starting point as an
+    // unlinked deployment: nothing pre-checked, full roster shown.
+    if (staffedIds.size === 0) {
+      included = new Set();
+      staffEffectiveRoles = new Map();
+      return;
+    }
+
+    // Default selection + roles for this date + shift. Manual tweaks made
+    // before a date/shift switch are intentionally reset — the default is
+    // per-shift.
+    included = new Set(staffedIds);
+    const nextMap = new Map<number, StaffRole>();
+    for (const id of staffedIds) {
+      const person = staff.find(s => s.id === id);
+      if (person) nextMap.set(id, suggestedRoles.get(id) ?? person.role);
+    }
+    staffEffectiveRoles = nextMap;
+  }
+
+  // Resolve staffing whenever the date or shift changes (and once on load).
+  $effect(() => {
+    const d = date;
+    const s = shift;
+    if (!data.squareConfigured) {
+      staffing = { ...NO_STAFFING, source: 'not_configured' };
+      return;
+    }
+    let cancelled = false;
+    staffing = { ...NO_STAFFING, loading: true };
+    fetch(`/api/staffing?date=${d}&shift=${s}`)
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(res => { if (!cancelled) applyStaffing(res); })
+      .catch(() => {
+        if (!cancelled) staffing = { ...NO_STAFFING, source: 'error' };
+      });
+    return () => { cancelled = true; };
+  });
+
   function setRole(id: number, role: StaffRole) {
     const next = new Map(staffEffectiveRoles);
     next.set(id, role);
@@ -48,7 +156,10 @@
   function selectAll() {
     const nextSet = new Set<number>();
     const nextMap = new Map<number, StaffRole>();
-    for (const s of staff) { nextSet.add(s.id); nextMap.set(s.id, s.role); }
+    for (const s of visibleStaff) {
+      nextSet.add(s.id);
+      nextMap.set(s.id, staffEffectiveRoles.get(s.id) ?? s.role);
+    }
     included = nextSet;
     staffEffectiveRoles = nextMap;
   }
@@ -65,9 +176,25 @@
   let newRole = $state<StaffRole>('FOH');
   let addError = $state('');
 
+  // Staff visible in the list. Defaults to the scheduled people only when
+  // Square staffing resolved someone for this date + shift; the full roster
+  // is one toggle away for adding covers.
+  const staffingActive = $derived(staffing.available && staffing.staffedIds.size > 0);
+  const visibleStaff = $derived(
+    !staffingActive || showFullRoster
+      ? staff
+      : staff.filter(s => staffing.staffedIds.has(s.id) || manuallyAdded.has(s.id))
+  );
+  // Roster members hidden by the scheduled-only view.
+  const hiddenRosterCount = $derived(
+    staffingActive && !showFullRoster
+      ? staff.filter(s => !staffing.staffedIds.has(s.id) && !manuallyAdded.has(s.id)).length
+      : 0
+  );
+
   // Detect duplicate names to show ID badges
   const nameCounts = $derived(
-    staff.reduce((acc, s) => { acc[s.name] = (acc[s.name] ?? 0) + 1; return acc; }, {} as Record<string, number>)
+    visibleStaff.reduce((acc, s) => { acc[s.name] = (acc[s.name] ?? 0) + 1; return acc; }, {} as Record<string, number>)
   );
 
   type RoleGroup = { label: string; role: StaffRole };
@@ -87,7 +214,7 @@
 
   const staffByRole = $derived(
     Object.fromEntries(
-      ROLE_GROUPS.map(g => [g.role, staff.filter(s => effectiveRoleOf(s) === g.role)])
+      ROLE_GROUPS.map(g => [g.role, visibleStaff.filter(s => effectiveRoleOf(s) === g.role)])
     ) as Record<'FOH' | 'Bar' | 'Kitchen' | 'Busser', StaffRow[]>
   );
 </script>
@@ -98,6 +225,7 @@
     <h1 style="font-size:1.5rem;font-weight:800;color:var(--primary);">TipSplit</h1>
     <div style="display:flex;gap:0.75rem;align-items:center;">
       <a href="/history" style="color:var(--muted);font-size:0.875rem;">History</a>
+      <a href="/reports" style="color:var(--muted);font-size:0.875rem;">Reports</a>
       {#if data.user?.role === 'manager'}
         <a href="/settings" style="color:var(--muted);font-size:0.875rem;">Settings</a>
       {/if}
@@ -167,12 +295,19 @@
       <div class="staff-toolbar">
         <p class="label" style="margin:0;">Staff working this shift</p>
         {#if staff.length > 0}
-          <div style="display:flex;gap:0.25rem;align-items:center;font-size:0.75rem;">
+          <div style="display:flex;gap:0.25rem;align-items:center;font-size:0.75rem;flex-wrap:wrap;">
             <button type="button" onclick={selectAll}
               style="background:none;border:none;color:var(--primary);padding:0;cursor:pointer;font-size:0.75rem;">Select All</button>
             <span style="color:var(--muted);">·</span>
             <button type="button" onclick={deselectAll}
               style="background:none;border:none;color:var(--primary);padding:0;cursor:pointer;font-size:0.75rem;">Deselect All</button>
+            {#if staffingActive}
+              <span style="color:var(--muted);">·</span>
+              <button type="button" onclick={() => showFullRoster = !showFullRoster}
+                style="background:none;border:none;color:var(--primary);padding:0;cursor:pointer;font-size:0.75rem;">
+                {showFullRoster ? 'Scheduled only' : `Full roster${hiddenRosterCount > 0 ? ` (+${hiddenRosterCount})` : ''}`}
+              </button>
+            {/if}
           </div>
         {/if}
         <button type="button" onclick={() => { showAddForm = !showAddForm; addError = ''; }}
@@ -181,6 +316,26 @@
           {showAddForm ? 'Cancel' : '+ Add Person'}
         </button>
       </div>
+
+      {#if staffing.loading}
+        <p class="staffing-note" role="status">Checking the Square schedule…</p>
+      {:else if staffingActive}
+        <p class="staffing-note">
+          Showing {staffing.staffedIds.size} scheduled for this shift from the
+          {staffing.source === 'shift_report' ? 'reviewed shift report' : 'Square schedule'}.
+          Uncheck anyone who missed work{showFullRoster ? '' : ', or open the full roster to add covers'}.
+          {#if staffing.notInRosterCount > 0}
+            {staffing.notInRosterCount} scheduled {staffing.notInRosterCount === 1 ? 'person is' : 'people are'}
+            not in the roster yet — add {staffing.notInRosterCount === 1 ? 'them' : 'anyone who worked'} below.
+          {/if}
+        </p>
+      {:else if staffing.source === 'no_schedule'}
+        <p class="staffing-note">No published Square schedule for this date — showing the full roster.</p>
+      {:else if staffing.source === 'error'}
+        <p class="staffing-note">Couldn't load the Square schedule — showing the full roster.</p>
+      {:else if data.squareConfigured && staffing.source === 'no_location'}
+        <p class="staffing-note">Square location not selected yet — showing the full roster. Pick a location in Settings.</p>
+      {/if}
 
       {#if showAddForm}
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem;margin-bottom:0.75rem;">
@@ -200,6 +355,10 @@
                   source: 'manual',
                   square_team_member_id: null,
                   staff_code: null,
+                  square_status: null,
+                  square_last_synced_at: null,
+                  default_tip_split_role: null,
+                  role_mapping_state: null,
                 };
                 staff = [...staff, newPerson].sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
                 const nextSet = new Set([...included, newPerson.id]);
@@ -207,6 +366,8 @@
                 nextMap.set(newPerson.id, newRole);
                 included = nextSet;
                 staffEffectiveRoles = nextMap;
+                // Keep the just-added person visible in the scheduled-only view.
+                manuallyAdded = new Set([...manuallyAdded, newPerson.id]);
                 newName = '';
                 showAddForm = false;
               } else if (result.type === 'failure') {
@@ -242,6 +403,14 @@
           No staff yet. Use "+ Add Person" above to add someone.
         </p>
       {:else}
+        {#if visibleStaff.length === 0}
+          <p style="color:var(--muted);font-size:0.875rem;">
+            Nobody in the roster is scheduled for this shift.
+            {#if staffingActive}
+              Open the full roster above to add people anyway.
+            {/if}
+          </p>
+        {/if}
         <div class="role-groups">
           {#each ROLE_GROUPS as { label, role }}
             {#if staffByRole[role].length > 0}
@@ -298,6 +467,13 @@
 <style>
   .staff-card {
     padding: 1rem;
+  }
+
+  .staffing-note {
+    margin: 0 0 0.85rem 0;
+    color: var(--muted);
+    font-size: 0.78rem;
+    line-height: 1.45;
   }
 
   .staff-toolbar {

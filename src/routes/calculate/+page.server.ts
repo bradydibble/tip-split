@@ -6,6 +6,7 @@ import { calculate, dollarsToCents } from '$lib/calculator';
 import { businessDate, defaultShift, DEFAULT_TIMEZONE } from '$lib/business-date';
 import { isValidDateStr, addDays } from '$lib/pay-period';
 import { nextStaffCode } from '$lib/server/staff-code';
+import { isSquareConfigured } from '$lib/server/square/config';
 import type { StaffRow } from '$lib/server/db';
 import { readRoleAssignments, STAFF_ROLES, type StaffRole } from '$lib/staff-role-selection';
 
@@ -24,7 +25,7 @@ export const load: PageServerLoad = ({ locals }) => {
   const today = businessDate(now, timeZone);
   const shift = defaultShift(now, timeZone, settings.lunch_cutoff ?? '15:00');
 
-  return { staff, settings, today, defaultShift: shift, user: locals.user };
+  return { staff, settings, today, defaultShift: shift, user: locals.user, squareConfigured: isSquareConfigured() };
 };
 
 export const actions: Actions = {
