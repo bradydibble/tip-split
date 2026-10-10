@@ -29,7 +29,9 @@ export interface StaffedPerson {
   staffId: number;
   name: string;
   staffCode: string | null;
-  /** Square-job-derived suggestion, TipSplit uppercase vocabulary. */
+  /** Role derived from the job this person is scheduled to work that day
+   *  (TipSplit uppercase vocabulary); roster default only when the shift
+   *  carries no job. Null when neither resolves (manager review). */
   suggestedRole: 'FOH' | 'BAR' | 'BUSSER' | 'KITCHEN' | null;
   /** The Square job title the person is scheduled to work, if known. */
   scheduledJobTitle: string | null;
@@ -220,6 +222,12 @@ async function staffingFromScheduledShifts(
     `SELECT id, name, staff_code, default_tip_split_role, role_mapping_state
      FROM staff WHERE square_team_member_id = ?`
   );
+  // Mapped role for the specific job this person is scheduled to work.
+  // Keyed per (staff, job) — the member must actually hold the job.
+  const schedRoleStmt = db.prepare(
+    `SELECT mapped_tip_role FROM staff_square_jobs
+     WHERE staff_id = ? AND square_job_id = ? AND active = 1 LIMIT 1`
+  );
 
   const seen = new Set<number>();
   for (const shift of shifts) {
@@ -253,10 +261,25 @@ async function staffingFromScheduledShifts(
     if (seen.has(rosterRow.id)) continue;
     seen.add(rosterRow.id);
 
-    if (
-      rosterRow.role_mapping_state === 'EXCLUDED' ||
-      rosterRow.default_tip_split_role === 'EXCLUDED'
-    ) {
+    // Position for the day comes from the SCHEDULE, not the roster default:
+    // people move between jobs (cashier one shift, bartender the next). The
+    // scheduled job's mapped role wins; the roster default is only the
+    // fallback for shifts that carry no job. A person whose roster default
+    // is EXCLUDED (e.g. a manager) but who is scheduled to a tip-earning
+    // job that day is included with that job's role — and vice versa.
+    // When someone holds several shifts in one window, the first shift's
+    // job wins (they can still be regrouped manually on the form).
+    const scheduledRole = jobId
+      ? ((schedRoleStmt.get(rosterRow.id, jobId) as
+          | { mapped_tip_role: string }
+          | undefined)?.mapped_tip_role ?? null)
+      : null;
+
+    if (scheduledRole === 'EXCLUDED') {
+      excluded.push({ name: rosterRow.name, scheduledJobTitle: jobTitle });
+      continue;
+    }
+    if (!scheduledRole && rosterRow.default_tip_split_role === 'EXCLUDED') {
       excluded.push({ name: rosterRow.name, scheduledJobTitle: jobTitle });
       continue;
     }
@@ -265,7 +288,7 @@ async function staffingFromScheduledShifts(
       staffId: rosterRow.id,
       name: rosterRow.name,
       staffCode: rosterRow.staff_code,
-      suggestedRole: normalizeRole(rosterRow.default_tip_split_role),
+      suggestedRole: normalizeRole(scheduledRole ?? rosterRow.default_tip_split_role),
       scheduledJobTitle: jobTitle,
     });
   }

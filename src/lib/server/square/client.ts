@@ -135,6 +135,7 @@ export class SquareWriteGuardError extends Error {
 
 interface MockState {
   teamMembersOverride?: typeof buildTeamMembersResponse;
+  scheduledShiftsOverride?: () => ReturnType<typeof buildScheduledShiftsResponse>;
 }
 
 const mockState: MockState = {};
@@ -143,9 +144,16 @@ const mockState: MockState = {};
 export function __setMockTeamMembers(fn: typeof buildTeamMembersResponse): void {
   mockState.teamMembersOverride = fn;
 }
+/** Replace the fixture-generated scheduled shifts (for test injection). */
+export function __setMockScheduledShifts(
+  fn: () => ReturnType<typeof buildScheduledShiftsResponse>
+): void {
+  mockState.scheduledShiftsOverride = fn;
+}
 /** Reset mock overrides (call in test afterEach). */
 export function __resetMockOverrides(): void {
   mockState.teamMembersOverride = undefined;
+  mockState.scheduledShiftsOverride = undefined;
 }
 
 /**
@@ -180,6 +188,9 @@ async function mockTransport(
     }
 
     case 'SearchScheduledShifts': {
+      if (mockState.scheduledShiftsOverride) {
+        return { json: mockState.scheduledShiftsOverride(), requestId };
+      }
       // Extract the business date from the real filter shape:
       // query.filter.start.start_at = "YYYY-MM-DDTHH:MM:SS±HH:MM"
       const shiftQuery = req.queryBody as {

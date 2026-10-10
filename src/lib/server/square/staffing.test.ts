@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -11,6 +11,10 @@ process.env.SQUARE_ACCESS_TOKEN = 'test-token';
 let staffing: typeof import('./staffing');
 let db: typeof import('../db').default;
 let fixtures: typeof import('./fixtures');
+let setMockShifts: typeof import('./client').__setMockScheduledShifts;
+let resetMock: typeof import('./client').__resetMockOverrides;
+
+afterEach(() => resetMock());
 
 const TZ = 'America/Los_Angeles';
 // Fixtures schedule (2026-08-27, published, assigned):
@@ -37,12 +41,17 @@ beforeAll(async () => {
   staffing = await import('./staffing');
   db = (await import('../db')).default;
   fixtures = await import('./fixtures');
+  ({ __setMockScheduledShifts: setMockShifts, __resetMockOverrides: resetMock } = await import('./client'));
 
   ROSTER = [
     { name: 'Pat Mixwell', role: 'Bar', code: 'TS-4001', tm: fixtures.TM_BARKEEP, defaultRole: 'BAR', state: 'MAPPED' },
     { name: 'Jordan Carries', role: 'FOH', code: 'TS-4002', tm: fixtures.TM_SERVER_A, defaultRole: 'FOH', state: 'MAPPED' },
     { name: 'Sam Grills', role: 'Kitchen', code: 'TS-4003', tm: fixtures.TM_COOK_B, defaultRole: 'KITCHEN', state: 'MAPPED' },
     { name: 'Alex Leads', role: 'FOH', code: 'TS-4004', tm: fixtures.TM_MANAGER_X, defaultRole: 'EXCLUDED', state: 'EXCLUDED' },
+    // Casey holds bartender + cashier jobs: conflicting payout roles put the
+    // ROSTER default in NEEDS_REVIEW (null) — only the scheduled job can
+    // resolve which position they actually work on a given day.
+    { name: 'Casey Wildcard', role: 'FOH', code: 'TS-4005', tm: fixtures.TM_UNKNOWN_J, defaultRole: null, state: 'NEEDS_REVIEW' },
   ];
 
   db.prepare(`
@@ -62,9 +71,14 @@ beforeAll(async () => {
     VALUES ((SELECT id FROM staff WHERE square_team_member_id = ?), ?, ?, ?, datetime('now'))
   `);
   insertJob.run(fixtures.TM_BARKEEP, 'JOB-bartender', 'Bartender', 'BAR');
+  // Pat also holds the food-runner job — lets a scheduled shift move them
+  // off their Bar default for a day.
+  insertJob.run(fixtures.TM_BARKEEP, 'JOB-food-runner', 'Food Runner', 'FOH');
   insertJob.run(fixtures.TM_SERVER_A, 'JOB-food-runner', 'Food Runner', 'FOH');
   insertJob.run(fixtures.TM_COOK_B, 'JOB-cook', 'Cook', 'KITCHEN');
   insertJob.run(fixtures.TM_MANAGER_X, 'JOB-manager', 'Manager', 'EXCLUDED');
+  insertJob.run(fixtures.TM_UNKNOWN_J, 'JOB-bartender', 'Bartender', 'BAR');
+  insertJob.run(fixtures.TM_UNKNOWN_J, 'JOB-cashier', 'Cashier', 'FOH');
   // No busser staff row exists (deliberately unsynced) — staff_square_jobs
   // links jobs to roster members, so their not-in-roster entry carries no
   // job title.
@@ -184,5 +198,112 @@ describe('getShiftStaffing — unconfigured deployments', () => {
     } finally {
       process.env.SQUARE_ACCESS_TOKEN = saved;
     }
+  });
+});
+
+// ── Per-shift position: the scheduled job decides the role ───────────────────
+//
+// People move between jobs day to day (cashier one shift, bartender the
+// next), so the suggested role must come from the job on the scheduled
+// shift — not the person's roster-wide default. A person whose job list is
+// ambiguous (conflicting payout roles → NEEDS_REVIEW) gets resolved by the
+// schedule; a person scheduled to an excluded job (e.g. manager) is excluded
+// for that day even if their roster default would include them.
+
+describe('getShiftStaffing — position from the scheduled job', () => {
+  const BD = '2026-09-15';
+
+  function shiftAt(
+    id: string,
+    tm: string,
+    startLocal: string,
+    endLocal: string,
+    jobId?: string
+  ): import('./fixtures').SquareScheduledShift {
+    return {
+      id,
+      published_shift_details: {
+        team_member_id: tm,
+        location_id: fixtures.TEST_LOCATION_ID,
+        job_id: jobId,
+        start_at: `${BD}T${startLocal}:00-07:00`,
+        end_at: `${BD}T${endLocal}:00-07:00`,
+      },
+    };
+  }
+
+  it('uses the scheduled job over the roster default (people move between roles)', async () => {
+    // Pat's roster default is BAR; today they are scheduled as food runner.
+    setMockShifts(() => ({
+      scheduled_shifts: [
+        shiftAt('X1', fixtures.TM_BARKEEP, '15:00', '21:00', 'JOB-food-runner'),
+      ],
+    }));
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.available).toBe(true);
+    expect(dinner.staffed).toHaveLength(1);
+    expect(dinner.staffed[0].name).toBe('Pat Mixwell');
+    expect(dinner.staffed[0].suggestedRole).toBe('FOH');
+    expect(dinner.staffed[0].scheduledJobTitle).toBe('Food Runner');
+  });
+
+  it('resolves an ambiguous multi-job person by the day\'s schedule', async () => {
+    // Casey holds bartender + cashier jobs → roster default is
+    // NEEDS_REVIEW (null). Scheduled as bartender tonight → BAR.
+    setMockShifts(() => ({
+      scheduled_shifts: [
+        shiftAt('X2', fixtures.TM_UNKNOWN_J, '15:00', '21:00', 'JOB-bartender'),
+      ],
+    }));
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.staffed).toHaveLength(1);
+    expect(dinner.staffed[0].name).toBe('Casey Wildcard');
+    expect(dinner.staffed[0].suggestedRole).toBe('BAR');
+    expect(dinner.staffed[0].scheduledJobTitle).toBe('Bartender');
+  });
+
+  it('falls back to the roster default when the shift carries no job', async () => {
+    setMockShifts(() => ({
+      scheduled_shifts: [shiftAt('X3', fixtures.TM_BARKEEP, '11:00', '15:00')],
+    }));
+
+    const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
+    expect(lunch.staffed).toHaveLength(1);
+    expect(lunch.staffed[0].suggestedRole).toBe('BAR');
+    expect(lunch.staffed[0].scheduledJobTitle).toBeNull();
+  });
+
+  it('excludes a person scheduled to an excluded job for that day', async () => {
+    // Alex's roster default is EXCLUDED anyway, but the decisive fact is the
+    // scheduled Manager job — visible in the excluded entry's job title.
+    setMockShifts(() => ({
+      scheduled_shifts: [
+        shiftAt('X4', fixtures.TM_MANAGER_X, '15:00', '21:00', 'JOB-manager'),
+      ],
+    }));
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.staffed).toEqual([]);
+    expect(dinner.excluded).toEqual([
+      { name: 'Alex Leads', scheduledJobTitle: 'Manager' },
+    ]);
+  });
+
+  it('keeps the first shift\'s job when someone holds two shifts in one window', async () => {
+    // Real schedules do this: food runner 16:00, then cashier 17:00, both
+    // inside Dinner. The first shift's job sets the suggested position.
+    setMockShifts(() => ({
+      scheduled_shifts: [
+        shiftAt('X5a', fixtures.TM_SERVER_A, '16:00', '20:00', 'JOB-food-runner'),
+        shiftAt('X5b', fixtures.TM_SERVER_A, '17:00', '20:00', 'JOB-cashier'),
+      ],
+    }));
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.staffed).toHaveLength(1);
+    expect(dinner.staffed[0].suggestedRole).toBe('FOH');
+    expect(dinner.staffed[0].scheduledJobTitle).toBe('Food Runner');
   });
 });
