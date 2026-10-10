@@ -109,7 +109,11 @@ describe('getShiftStaffing — live Square schedule (mock transport)', () => {
     expect(jordan?.suggestedRole).toBe('FOH');
 
     expect(result.notInRoster).toEqual([]);
-    expect(result.excluded).toEqual([]);
+    // The manager's all-day shift spans the boundary, so with dual
+    // assignment they are excluded from Lunch as well as Dinner.
+    expect(result.excluded).toEqual([
+      { name: 'Alex Leads', scheduledJobTitle: 'Manager' },
+    ]);
   });
 
   it('defaults Dinner to its crew, excluding role-mapped managers and flagging unsynced people', async () => {
@@ -291,9 +295,10 @@ describe('getShiftStaffing — position from the scheduled job', () => {
     ]);
   });
 
-  it('keeps the first shift\'s job when someone holds two shifts in one window', async () => {
+  it('picks the job of the shift spending the most time in the window', async () => {
     // Real schedules do this: food runner 16:00, then cashier 17:00, both
-    // inside Dinner. The first shift's job sets the suggested position.
+    // inside Dinner. The food-runner shift spends more time inside the
+    // window, so it sets the suggested position.
     setMockShifts(() => ({
       scheduled_shifts: [
         shiftAt('X5a', fixtures.TM_SERVER_A, '16:00', '20:00', 'JOB-food-runner'),
@@ -305,5 +310,61 @@ describe('getShiftStaffing — position from the scheduled job', () => {
     expect(dinner.staffed).toHaveLength(1);
     expect(dinner.staffed[0].suggestedRole).toBe('FOH');
     expect(dinner.staffed[0].scheduledJobTitle).toBe('Food Runner');
+  });
+
+  it('counts a boundary-spanning shift in BOTH windows (the missed-lunch bug)', async () => {
+    // Real case that slipped through: someone scheduled 12:00–21:00 works
+    // the lunch service AND the dinner service. Midpoint-only assignment
+    // dropped them from Lunch entirely.
+    setMockShifts(() => ({
+      scheduled_shifts: [
+        shiftAt('X6', fixtures.TM_UNKNOWN_J, '12:00', '21:00', 'JOB-bartender'),
+      ],
+    }));
+
+    const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
+    expect(lunch.staffed.map(p => p.name)).toEqual(['Casey Wildcard']);
+    expect(lunch.staffed[0].suggestedRole).toBe('BAR');
+    expect(lunch.staffed[0].scheduledJobTitle).toBe('Bartender');
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.staffed.map(p => p.name)).toEqual(['Casey Wildcard']);
+    expect(dinner.staffed[0].suggestedRole).toBe('BAR');
+  });
+
+  it('resolves a straddler with a later evening shift per window position', async () => {
+    // Cashier 11:30–16:00 (spans the boundary) + food runner 17:00–21:00:
+    // Lunch position = Cashier; Dinner position = Food runner (it spends
+    // more time inside the dinner window than the straddler's last hour).
+    setMockShifts(() => ({
+      scheduled_shifts: [
+        shiftAt('X7a', fixtures.TM_SERVER_A, '11:30', '16:00', 'JOB-cashier'),
+        shiftAt('X7b', fixtures.TM_SERVER_A, '17:00', '21:00', 'JOB-food-runner'),
+      ],
+    }));
+
+    const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
+    expect(lunch.staffed[0].scheduledJobTitle).toBe('Cashier');
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.staffed).toHaveLength(1);
+    expect(dinner.staffed[0].scheduledJobTitle).toBe('Food Runner');
+  });
+
+  it('keeps boundary-exact shifts single-window', async () => {
+    // Ends exactly at 15:00 → Lunch only; starts exactly at 15:00 → Dinner
+    // only. Someone who leaves at close of lunch did not work dinner.
+    setMockShifts(() => ({
+      scheduled_shifts: [
+        shiftAt('X8a', fixtures.TM_COOK_B, '11:00', '15:00', 'JOB-cook'),
+        shiftAt('X8b', fixtures.TM_BARKEEP, '15:00', '21:00', 'JOB-bartender'),
+      ],
+    }));
+
+    const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
+    expect(lunch.staffed.map(p => p.name)).toEqual(['Sam Grills']);
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.staffed.map(p => p.name)).toEqual(['Pat Mixwell']);
   });
 });

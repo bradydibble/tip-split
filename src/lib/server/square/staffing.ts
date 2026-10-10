@@ -21,7 +21,13 @@
 import db from '../db';
 import { loadSquareConfig } from './config';
 import { searchScheduledShifts } from './client';
-import { partitionShifts, businessDayWindowUtc } from './shift-import';
+import {
+  partitionShifts,
+  businessDayWindowUtc,
+  shiftLocalParts,
+  LUNCH_BOUNDARY_HOUR,
+  LUNCH_BOUNDARY_MINUTE,
+} from './shift-import';
 import type { SquareScheduledShift } from './fixtures';
 
 /** A scheduled person resolved to a local roster row. */
@@ -135,13 +141,19 @@ export async function getShiftStaffing(
   // 2) Live read-only fetch. Nothing is persisted by this path.
   const { startUtc, endUtc } = businessDayWindowUtc(businessDateStr, timeZone);
   const { scheduled_shifts } = await searchScheduledShifts(locationId, startUtc, endUtc);
-  const { lunch, dinner } = partitionShifts(scheduled_shifts, timeZone);
+  // A shift that spans the Lunch/Dinner boundary staffs BOTH windows —
+  // someone scheduled 12:00–21:00 worked the lunch service and the dinner
+  // service. (Single-window midpoint assignment would drop them from the
+  // window their shift started in.)
+  const { lunch, dinner } = partitionShifts(scheduled_shifts, timeZone, {
+    allowDualAssignment: true,
+  });
   const windowShifts = shiftType === 'Lunch' ? lunch : dinner;
 
   // Nothing published (or nothing assigned) for this business window.
   if (windowShifts.length === 0) return EMPTY('no_schedule');
 
-  return staffingFromScheduledShifts(windowShifts);
+  return staffingFromScheduledShifts(windowShifts, shiftType, timeZone);
 }
 
 function staffingFromReportAttendance(
@@ -209,7 +221,9 @@ function staffingFromReportAttendance(
 }
 
 async function staffingFromScheduledShifts(
-  shifts: SquareScheduledShift[]
+  shifts: SquareScheduledShift[],
+  window: 'Lunch' | 'Dinner',
+  timeZone: string
 ): Promise<ShiftStaffing> {
   const staffed: StaffedPerson[] = [];
   const notInRoster: UnmatchedScheduledPerson[] = [];
@@ -229,20 +243,65 @@ async function staffingFromScheduledShifts(
      WHERE staff_id = ? AND square_job_id = ? AND active = 1 LIMIT 1`
   );
 
-  const seen = new Set<number>();
+  // Group each person's shifts in this window; the position comes from the
+  // job on the shift where they spend the MOST time inside the window
+  // (ties → the later shift, since the later job is usually the position
+  // they close in). With boundary-spanning shifts dual-assigned into both
+  // windows, this is what keeps a morning cashier + evening food runner
+  // resolved as cashier for Lunch and food runner for Dinner.
+  const byPerson = new Map<string, SquareScheduledShift[]>();
   for (const shift of shifts) {
     // Real shape: published details first, draft only as a partitioning
     // fallback for unpublished shifts (documented policy in shift-import).
     const details = shift.published_shift_details ?? shift.draft_shift_details;
     if (!details?.team_member_id) continue;
+    const list = byPerson.get(details.team_member_id) ?? [];
+    list.push(shift);
+    byPerson.set(details.team_member_id, list);
+  }
 
-    const jobId = details.job_id ?? null;
-    const jobTitle = jobId
-      ? ((jobTitleStmt.get(jobId) as { square_job_title: string } | undefined)
+  /** Minutes this shift spends inside the requested window (local clock). */
+  const overlapMinutes = (shift: SquareScheduledShift): number => {
+    const d = shift.published_shift_details ?? shift.draft_shift_details;
+    if (!d) return 0;
+    const s = shiftLocalParts(d.start_at, timeZone);
+    const e = shiftLocalParts(d.end_at, timeZone);
+    const startMin = s.hour * 60 + s.minute;
+    const endMin = e.hour * 60 + e.minute;
+    const boundary = LUNCH_BOUNDARY_HOUR * 60 + LUNCH_BOUNDARY_MINUTE;
+    // Overnight shifts belong to Dinner entirely (partition rule).
+    if (endMin <= startMin) return window === 'Dinner' ? endMin + 24 * 60 - startMin : 0;
+    if (window === 'Lunch') return Math.max(0, Math.min(endMin, boundary) - startMin);
+    return Math.max(0, endMin - Math.max(startMin, boundary));
+  };
+  const startMinutes = (shift: SquareScheduledShift): number => {
+    const d = shift.published_shift_details ?? shift.draft_shift_details;
+    if (!d) return 0;
+    const p = shiftLocalParts(d.start_at, timeZone);
+    return p.hour * 60 + p.minute;
+  };
+
+  for (const [teamMemberId, personShifts] of byPerson) {
+    const jobIdOf = (shift: SquareScheduledShift): string | null =>
+      (shift.published_shift_details ?? shift.draft_shift_details)?.job_id ?? null;
+
+    // Prefer shifts that carry a job (a job-less shift is a data gap, not a
+    // position); among those, the longest window overlap wins.
+    const withJob = personShifts.filter((s) => jobIdOf(s));
+    const pool = withJob.length > 0 ? withJob : personShifts;
+    const chosen = pool.reduce((best, s) => {
+      const so = overlapMinutes(s), bo = overlapMinutes(best);
+      const ss = startMinutes(s), bs = startMinutes(best);
+      return so > bo || (so === bo && ss > bs) ? s : best;
+    }, pool[0]);
+
+    const chosenJobId = jobIdOf(chosen);
+    const jobTitle = chosenJobId
+      ? ((jobTitleStmt.get(chosenJobId) as { square_job_title: string } | undefined)
           ?.square_job_title ?? null)
       : null;
 
-    const rosterRow = rosterStmt.get(details.team_member_id) as
+    const rosterRow = rosterStmt.get(teamMemberId) as
       | {
           id: number;
           name: string;
@@ -258,8 +317,6 @@ async function staffingFromScheduledShifts(
       notInRoster.push({ name: null, scheduledJobTitle: jobTitle });
       continue;
     }
-    if (seen.has(rosterRow.id)) continue;
-    seen.add(rosterRow.id);
 
     // Position for the day comes from the SCHEDULE, not the roster default:
     // people move between jobs (cashier one shift, bartender the next). The
@@ -267,10 +324,8 @@ async function staffingFromScheduledShifts(
     // fallback for shifts that carry no job. A person whose roster default
     // is EXCLUDED (e.g. a manager) but who is scheduled to a tip-earning
     // job that day is included with that job's role — and vice versa.
-    // When someone holds several shifts in one window, the first shift's
-    // job wins (they can still be regrouped manually on the form).
-    const scheduledRole = jobId
-      ? ((schedRoleStmt.get(rosterRow.id, jobId) as
+    const scheduledRole = chosenJobId
+      ? ((schedRoleStmt.get(rosterRow.id, chosenJobId) as
           | { mapped_tip_role: string }
           | undefined)?.mapped_tip_role ?? null)
       : null;
