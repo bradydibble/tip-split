@@ -1,10 +1,16 @@
 <script lang="ts">
-  let { children } = $props();
+  import ReleaseNotesModal from '$lib/components/ReleaseNotesModal.svelte';
+
+  let { data, children } = $props();
 </script>
 
 <svelte:head>
   <title>TipSplit</title>
 </svelte:head>
+
+{#if data.releaseNotes}
+  <ReleaseNotesModal version={data.releaseNotes.version} bullets={data.releaseNotes.bullets} />
+{/if}
 
 {@render children()}
 

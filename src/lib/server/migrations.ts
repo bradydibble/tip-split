@@ -281,6 +281,20 @@ const MIGRATIONS: Migration[] = [
       ).run();
     },
   },
+  {
+    id: 3,
+    description: 'Release-notes acknowledgements: one row per user per release, drives the once-per-release "What\'s new" modal.',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS release_note_acks (
+          user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          release  TEXT    NOT NULL,
+          acked_at TEXT    NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (user_id, release)
+        );
+      `);
+    },
+  },
 ];
 
 /**
