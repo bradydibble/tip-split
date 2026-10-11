@@ -123,6 +123,8 @@
     </form>
 
     <div style="margin-top:1rem;display:flex;flex-direction:column;gap:0.75rem;">
+      <a href="/settings/square" class="btn btn-secondary">Square Connection</a>
+      <a href="/admin/labor" class="btn btn-secondary">Labor Costs</a>
       <a href="/settings/staff" class="btn btn-secondary">Manage Staff Roster</a>
       <a href="/settings/users" class="btn btn-secondary">Manage Users & PINs</a>
       <a href="/admin/tips" class="btn btn-secondary">Pay Period Tips</a>
