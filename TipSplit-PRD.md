@@ -75,6 +75,7 @@ Tips are calculated per shift (Lunch and Dinner are independent). The cutoff bet
 | SM-5 | Pull active staff from Square team management | P1 | 2 |
 | SM-6 | Auto-assign shift based on clock-in time and configurable cutoff | P1 | 2 |
 | SM-7 | When a Square schedule is linked, the calculate screen defaults its staff list and selection to the people published as scheduled for the chosen business date + shift (reviewed shift-report attendance when present, else a live read-only scheduled-shift fetch; `GET /api/staffing`). Staff can still be removed (missed work) or added (covers) via the full-roster toggle or quick-add. Unlinked deployments keep the full-roster behavior | P1 | 2 ✅ |
+| SM-8 | Staff lifecycle: managers can archive (deactivate) and delete (zero-history only) staff from Settings → Staff, with duplicate-record merging. Roster sync auto-archives manual staff who are not linked to any active Square team member once their most recent tip distribution is 30+ days old — never sooner, protecting brand-new hires; archived staff keep all payroll history and can be re-activated | P1 | 2 ✅ |
 
 ### Tip Input
 
