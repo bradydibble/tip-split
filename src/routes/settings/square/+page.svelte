@@ -280,6 +280,9 @@
             <div class="status-row"><span>Created</span><span class="badge badge-current">{c.created}</span></div>
             <div class="status-row"><span>Updated</span><span class="badge">{c.updated}</span></div>
             <div class="status-row"><span>Deactivated</span><span class="badge" style="color:var(--danger);border-color:var(--danger)">{c.deactivated}</span></div>
+            {#if c.autoHidden > 0}
+              <div class="status-row"><span>Auto-archived (not in Square, 30+ days idle)</span><span class="badge" style="color:var(--danger);border-color:var(--danger)">{c.autoHidden}</span></div>
+            {/if}
             <div class="status-row"><span>Needs Review</span><span class="badge" style="color:var(--primary);border-color:var(--primary)">{c.needsReview}</span></div>
             <div class="status-row"><span>Excluded</span><span class="badge">{c.excluded}</span></div>
           </div>

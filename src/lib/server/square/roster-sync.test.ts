@@ -225,8 +225,9 @@ describe('syncRoster', () => {
     expect(() => new Date(pat?.square_last_synced_at as string)).not.toThrow();
   });
 
-  it('does not touch manually-created staff (source=manual)', async () => {
-    // Create a manual staff member
+  it('does not touch manually-created staff with no tip history', async () => {
+    // Create a manual staff member — never paid, never in Square. They may
+    // be a brand-new hire: auto-archive must not touch them.
     db.prepare(
       "INSERT INTO staff (name, role, active, source, staff_code) VALUES ('Manual Mike', 'FOH', 1, 'manual', 'TS-9999')"
     ).run();
@@ -239,5 +240,78 @@ describe('syncRoster', () => {
     expect(mike.source).toBe('manual');
     expect(mike.active).toBe(1);
     expect(mike.name).toBe('Manual Mike');
+  });
+
+  it('auto-archives manual staff not in Square whose last tip distribution is 30+ days old', async () => {
+    // A departed employee: manual row, last paid long before the cutoff.
+    const goneId = Number(db.prepare(
+      "INSERT INTO staff (name, role, active, source, staff_code) VALUES ('Gone Gabi', 'Kitchen', 1, 'manual', 'TS-9998')"
+    ).run().lastInsertRowid);
+    const calcId = Number(db.prepare(`
+      INSERT INTO tip_calculations
+        (date, shift, gross_tips_cents, liquor_sales_cents, cc_fee_rate, kitchen_pct,
+         bar_liquor_pct, cc_fees_cents, tips_after_fees_cents, kitchen_pool_cents,
+         bar_pool_cents, busser_pool_cents, foh_pool_cents)
+      VALUES ('2026-05-01', 'Dinner', 10000, 0, 0.03, 0.10, 0.10, 300, 9700, 970, 0, 0, 8730)
+    `).run().lastInsertRowid);
+    db.prepare(`
+      INSERT INTO tip_distributions (calculation_id, staff_id, name, role, kitchen_share_cents, total_cents)
+      VALUES (?, ?, 'Gone Gabi', 'Kitchen', 1000, 1000)
+    `).run(calcId, goneId);
+
+    const result = await rosterSync.syncRoster(fixtures.TEST_LOCATION_ID);
+
+    expect(result.counts.autoHidden).toBe(1);
+    const gabi = db.prepare('SELECT active FROM staff WHERE id = ?').get(goneId) as { active: number };
+    expect(gabi.active).toBe(0);
+  });
+
+  it('keeps manual staff whose most recent tip distribution is within 30 days', async () => {
+    const stillHereId = Number(db.prepare(
+      "INSERT INTO staff (name, role, active, source, staff_code) VALUES ('Active Ana', 'FOH', 1, 'manual', 'TS-9997')"
+    ).run().lastInsertRowid);
+    const recent = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const calcId = Number(db.prepare(`
+      INSERT INTO tip_calculations
+        (date, shift, gross_tips_cents, liquor_sales_cents, cc_fee_rate, kitchen_pct,
+         bar_liquor_pct, cc_fees_cents, tips_after_fees_cents, kitchen_pool_cents,
+         bar_pool_cents, busser_pool_cents, foh_pool_cents)
+      VALUES (?, 'Dinner', 10000, 0, 0.03, 0.10, 0.10, 300, 9700, 970, 0, 0, 8730)
+    `).run(recent).lastInsertRowid);
+    db.prepare(`
+      INSERT INTO tip_distributions (calculation_id, staff_id, name, role, foh_share_cents, total_cents)
+      VALUES (?, ?, 'Active Ana', 'FOH', 1000, 1000)
+    `).run(calcId, stillHereId);
+
+    await rosterSync.syncRoster(fixtures.TEST_LOCATION_ID);
+
+    const ana = db.prepare('SELECT active FROM staff WHERE id = ?').get(stillHereId) as { active: number };
+    expect(ana.active).toBe(1);
+  });
+
+  it('auto-archive never deletes: archived manual staff keep their tip history', async () => {
+    const goneId = Number(db.prepare(
+      "INSERT INTO staff (name, role, active, source, staff_code) VALUES ('Gone Gil', 'Bar', 1, 'manual', 'TS-9996')"
+    ).run().lastInsertRowid);
+    const oldDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const calcId = Number(db.prepare(`
+      INSERT INTO tip_calculations
+        (date, shift, gross_tips_cents, liquor_sales_cents, cc_fee_rate, kitchen_pct,
+         bar_liquor_pct, cc_fees_cents, tips_after_fees_cents, kitchen_pool_cents,
+         bar_pool_cents, busser_pool_cents, foh_pool_cents)
+      VALUES (?, 'Dinner', 10000, 0, 0.03, 0.10, 0.10, 300, 9700, 970, 0, 0, 8730)
+    `).run(oldDate).lastInsertRowid);
+    db.prepare(`
+      INSERT INTO tip_distributions (calculation_id, staff_id, name, role, bar_pool_share_cents, total_cents)
+      VALUES (?, ?, 'Gone Gil', 'Bar', 500, 500)
+    `).run(calcId, goneId);
+
+    await rosterSync.syncRoster(fixtures.TEST_LOCATION_ID);
+
+    // Row deactivated, not deleted — payroll history intact.
+    const gil = db.prepare('SELECT active FROM staff WHERE id = ?').get(goneId) as { active: number };
+    expect(gil.active).toBe(0);
+    const dists = db.prepare('SELECT COUNT(*) AS n FROM tip_distributions WHERE staff_id = ?').get(goneId) as { n: number };
+    expect(dists.n).toBe(1);
   });
 });
