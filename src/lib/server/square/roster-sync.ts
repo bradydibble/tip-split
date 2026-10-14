@@ -31,6 +31,9 @@ export type RosterCounts = {
   deactivated: number;
   needsReview: number;
   excluded: number;
+  /** Manual-source staff auto-archived: not linked to any active Square
+   *  member and their last tip distribution is more than 30 days old. */
+  autoHidden: number;
 };
 
 export interface RosterSyncResult {
@@ -151,6 +154,7 @@ export async function syncRoster(locationId: string): Promise<RosterSyncResult> 
   let deactivated = 0;
   let needsReview = 0;
   let excluded = 0;
+  let autoHidden = 0;
 
   const syncTs = new Date().toISOString();
 
@@ -286,10 +290,39 @@ export async function syncRoster(locationId: string): Promise<RosterSyncResult> 
         }
       }
     }
+
+    // Phase 3: auto-archive manual staff who are no longer active in
+    // Square payroll. The signal: not linked to any active Square team
+    // member AND their most recent tip distribution is more than 30 days
+    // old. The 30-day guard protects brand-new manual additions (no
+    // distributions yet, or only recent ones) from being archived before
+    // they ever work; the manager can always archive explicitly from
+    // Settings → Staff and re-activate later.
+    const manualActive = db.prepare(`
+      SELECT s.id, s.name, MAX(c.date) AS last_paid
+      FROM staff s
+      LEFT JOIN tip_distributions d ON d.staff_id = s.id
+      LEFT JOIN tip_calculations c ON c.id = d.calculation_id
+      WHERE s.active = 1 AND s.source = 'manual' AND s.square_team_member_id IS NULL
+      GROUP BY s.id, s.name
+    `).all() as { id: number; name: string; last_paid: string | null }[];
+
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+    for (const row of manualActive) {
+      if (row.last_paid && row.last_paid < cutoff) {
+        db.prepare(
+          'UPDATE staff SET active = 0, square_status = ? WHERE id = ?'
+        ).run('INACTIVE', row.id);
+        autoHidden++;
+      }
+    }
   })();
 
   return {
-    counts: { created, updated, deactivated, needsReview, excluded },
+    counts: { created, updated, deactivated, needsReview, excluded, autoHidden },
     reviewStaffIds,
     fetched: team_members.length,
   };
