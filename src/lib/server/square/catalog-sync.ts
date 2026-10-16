@@ -16,6 +16,7 @@ import db from '../db';
 import { listCatalog } from './client';
 import { buildCategoryTree, type CategoryTree } from './catalog';
 import { getLiquorCategoryId, saveLiquorCategoryId } from './config';
+import { getLocation } from './client';
 
 export interface CategoryOption {
   id: string;
@@ -126,11 +127,34 @@ export async function syncCatalog(): Promise<CatalogSyncResult> {
   ).get() as { square_location_id: string } | undefined;
 
   if (connRow) {
+    // Sync weekly business hours from Square so shift windows (lunch open,
+    // dinner close) track the recorded schedule instead of hardcoded times.
+    let weeklyHoursJson: string | null = null;
+    try {
+      const { location } = await getLocation(connRow.square_location_id);
+      const periods = location.business_hours?.periods ?? [];
+      if (periods.length) {
+        const hours: Record<string, { open: string; close: string }> = {};
+        for (const p of periods) {
+          const day = p.day_of_week;
+          if (!hours[day]) {
+            hours[day] = {
+              open: (p.start_local_time ?? '').slice(0, 5),
+              close: (p.end_local_time ?? '').slice(0, 5),
+            };
+          }
+        }
+        weeklyHoursJson = JSON.stringify(hours);
+      }
+    } catch {
+      weeklyHoursJson = null;
+    }
     db.prepare(`
       UPDATE square_connections
-      SET last_catalog_sync_at = datetime('now'), updated_at = datetime('now')
+      SET last_catalog_sync_at = datetime('now'), updated_at = datetime('now'),
+          weekly_hours_json = COALESCE(?, weekly_hours_json)
       WHERE square_location_id = ?
-    `).run(connRow.square_location_id);
+    `).run(weeklyHoursJson, connRow.square_location_id);
   }
 
   return {

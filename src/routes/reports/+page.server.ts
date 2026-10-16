@@ -125,11 +125,45 @@ export const actions: Actions = {
     const timeZone = settings.timezone ?? DEFAULT_TIMEZONE;
 
     // Compute window bounds for the report.
-    // Dinner close precedence: daily override -> weekly hours (Square business
-    // hours synced onto the connection) -> configured dinner_close setting ->
-    // 21:00 legacy default. Hardcoding the close dropped the last hour of
-    // orders (and their liquor sales) whenever the venue ran past 21:00.
-    const lunchClose = localToUtc(report.business_date, '15:00', timeZone);
+    // Lunch open: Square weekly business hours when synced (12:00 on
+    // Sat/Sun), else the 11:00 default. Lunch close: the lunch_cutoff
+    // setting, so a manager can move the boundary when service drifts
+    // before or after 15:00. Dinner close precedence: daily override ->
+    // weekly hours (Square business hours synced onto the connection) ->
+    // configured dinner_close setting -> 21:00 legacy default. Hardcoding
+    // the close dropped the last hour of orders (and their liquor sales)
+    // whenever the venue ran past 21:00.
+    let lunchOpenLocal = '11:00';
+    const connRow = db
+      .prepare(
+        'SELECT weekly_hours_json FROM square_connections WHERE location_id = ?'
+      )
+      .get(report.location_id) as
+      | { weekly_hours_json: string | null }
+      | undefined;
+    let weeklyHours: Record<string, { open?: string; close?: string }> | null =
+      null;
+    if (connRow?.weekly_hours_json) {
+      try {
+        weeklyHours = JSON.parse(
+          connRow.weekly_hours_json
+        ) as Record<string, { open?: string; close?: string }>;
+      } catch {
+        weeklyHours = null;
+      }
+    }
+    if (weeklyHours) {
+      const dayOfWeek = new Intl.DateTimeFormat('en-US', { weekday: 'short' })
+        .format(new Date(`${report.business_date}T12:00:00Z`))
+        .toUpperCase();
+      lunchOpenLocal = weeklyHours[dayOfWeek]?.open ?? lunchOpenLocal;
+    }
+    const lunchOpen = localToUtc(report.business_date, lunchOpenLocal, timeZone);
+    const lunchClose = localToUtc(
+      report.business_date,
+      settings.lunch_cutoff ?? '15:00',
+      timeZone
+    );
     let dinnerCloseLocal: string;
     if (report.close_source === 'override' && report.close_override_id) {
       const override = db
@@ -139,33 +173,17 @@ export const actions: Actions = {
         .get(report.close_override_id) as { close_local: string } | undefined;
       dinnerCloseLocal = override?.close_local ?? '21:00';
     } else {
-      const conn = db
-        .prepare(
-          'SELECT weekly_hours_json FROM square_connections WHERE location_id = ?'
-        )
-        .get(report.location_id) as
-        | { weekly_hours_json: string | null }
-        | undefined;
       let weeklyClose: string | null = null;
-      if (conn?.weekly_hours_json) {
-        try {
-          const hours = JSON.parse(conn.weekly_hours_json) as Record<
-            string,
-            { close?: string }
-          >;
-          const dayOfWeek = new Intl.DateTimeFormat('en-US', {
-            weekday: 'short',
-          })
-            .format(new Date(`${report.business_date}T12:00:00Z`))
-            .toUpperCase();
-          weeklyClose = hours[dayOfWeek]?.close ?? null;
-        } catch {
-          weeklyClose = null;
-        }
+      if (weeklyHours) {
+        const dayOfWeek = new Intl.DateTimeFormat('en-US', {
+          weekday: 'short',
+        })
+          .format(new Date(`${report.business_date}T12:00:00Z`))
+          .toUpperCase();
+        weeklyClose = weeklyHours[dayOfWeek]?.close ?? null;
       }
       dinnerCloseLocal = weeklyClose ?? settings.dinner_close ?? '21:00';
     }
-    const lunchOpen = localToUtc(report.business_date, '11:00', timeZone);
     const dinnerClose = localToUtc(
       report.business_date,
       dinnerCloseLocal,
