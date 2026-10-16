@@ -124,10 +124,53 @@ export const actions: Actions = {
     const settings = getSettings();
     const timeZone = settings.timezone ?? DEFAULT_TIMEZONE;
 
-    // Compute window bounds for the report
-    const lunchOpen = localToUtc(report.business_date, '11:00', timeZone);
+    // Compute window bounds for the report.
+    // Dinner close precedence: daily override -> weekly hours (Square business
+    // hours synced onto the connection) -> configured dinner_close setting ->
+    // 21:00 legacy default. Hardcoding the close dropped the last hour of
+    // orders (and their liquor sales) whenever the venue ran past 21:00.
     const lunchClose = localToUtc(report.business_date, '15:00', timeZone);
-    const dinnerClose = localToUtc(report.business_date, '21:00', timeZone);
+    let dinnerCloseLocal: string;
+    if (report.close_source === 'override' && report.close_override_id) {
+      const override = db
+        .prepare(
+          'SELECT close_local FROM dinner_close_overrides WHERE id = ?'
+        )
+        .get(report.close_override_id) as { close_local: string } | undefined;
+      dinnerCloseLocal = override?.close_local ?? '21:00';
+    } else {
+      const conn = db
+        .prepare(
+          'SELECT weekly_hours_json FROM square_connections WHERE location_id = ?'
+        )
+        .get(report.location_id) as
+        | { weekly_hours_json: string | null }
+        | undefined;
+      let weeklyClose: string | null = null;
+      if (conn?.weekly_hours_json) {
+        try {
+          const hours = JSON.parse(conn.weekly_hours_json) as Record<
+            string,
+            { close?: string }
+          >;
+          const dayOfWeek = new Intl.DateTimeFormat('en-US', {
+            weekday: 'short',
+          })
+            .format(new Date(`${report.business_date}T12:00:00Z`))
+            .toUpperCase();
+          weeklyClose = hours[dayOfWeek]?.close ?? null;
+        } catch {
+          weeklyClose = null;
+        }
+      }
+      dinnerCloseLocal = weeklyClose ?? settings.dinner_close ?? '21:00';
+    }
+    const lunchOpen = localToUtc(report.business_date, '11:00', timeZone);
+    const dinnerClose = localToUtc(
+      report.business_date,
+      dinnerCloseLocal,
+      timeZone
+    );
 
     const windowStart = report.shift_type === 'Lunch' ? lunchOpen : lunchClose;
     const windowEnd = report.shift_type === 'Lunch' ? lunchClose : dinnerClose;
