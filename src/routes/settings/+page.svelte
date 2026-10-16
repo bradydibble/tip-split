@@ -73,6 +73,12 @@
         </label>
 
         <label class="field">
+          <span>Dinner Close (local, 24h)</span>
+          <input class="input" type="time" name="dinner_close"
+            value={data.settings.dinner_close ?? '21:00'} />
+        </label>
+
+        <label class="field">
           <span>Restaurant Name</span>
           <input class="input" type="text" name="restaurant_name"
             value={data.settings.restaurant_name} />

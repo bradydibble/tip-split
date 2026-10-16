@@ -45,12 +45,17 @@ export const actions: Actions = {
     if (!isValidDateStr(anchor) || !isSunday(anchor))
       return fail(400, { error: 'Pay period anchor must be a Sunday (YYYY-MM-DD)' });
 
+    const dinnerClose = String(fd.get('dinner_close') ?? '21:00');
+    if (!/^\d{2}:\d{2}$/.test(dinnerClose))
+      return fail(400, { error: 'Dinner close must be HH:MM (24-hour local time)' });
+
     const updates: [string, string][] = [
       ['cc_fee_rate',                  String(ccFeeRate)],
       ['kitchen_pct',                  String(kitchenPct)],
       ['bar_liquor_pct',               String(barLiquorPct)],
       ['busser_rate',                  String(busserRate)],
       ['lunch_cutoff',                 String(fd.get('lunch_cutoff') ?? '15:00')],
+      ['dinner_close',                 String(fd.get('dinner_close') ?? '21:00')],
       ['timezone',                     timezone],
       ['restaurant_name',              String(fd.get('restaurant_name') ?? '')],
       ['google_sheets_spreadsheet_id', String(fd.get('google_sheets_spreadsheet_id') ?? '')],
