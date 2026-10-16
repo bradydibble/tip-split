@@ -421,6 +421,19 @@ export async function listLocations(): Promise<{ locations: SquareLocation[] }> 
   return { locations: results };
 }
 
+export async function getLocation(
+  locationId: string,
+): Promise<{ location: SquareLocation }> {
+  const { results } = await paginatedRequest<SquareLocation>({
+    method: 'GET',
+    path: `/v2/locations/${locationId}`,
+    operation: 'RetrieveLocation',
+    envelopeField: 'location',
+    maxPages: 1,
+  });
+  return { location: results[0] };
+}
+
 export async function searchTeamMembers(
   locationId: string,
 ): Promise<{ team_members: SquareTeamMember[] }> {
