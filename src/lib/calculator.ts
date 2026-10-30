@@ -36,12 +36,10 @@ export interface CalculationResult {
   grossTipsCents: number;
   ccFeesCents: number;
   tipsAfterFeesCents: number;
-  kitchenPoolCents: number;
-  remainingAfterKitchenCents: number;
-  busserPoolCents: number;
-  remainingAfterBusserCents: number;
-  liquorSalesCents: number;
   barPoolCents: number;
+  remainingAfterBarCents: number;
+  kitchenPoolCents: number;
+  busserPoolCents: number;
   fohPoolCents: number;
   fohStaffCount: number;
   fohPoolParticipantCount: number;
@@ -97,6 +95,11 @@ function distributePoolCents(poolCents: number, count: number): number[] {
  *   FOH staff     → share FOH pool equally
  *   Bar staff     → share FOH pool equally AND receive bar pool share
  *   Kitchen staff → share kitchen pool equally
+ *   Busser staff  → fixed per-person cut from the FOH side
+ *
+ * Order of operations: Tip → CC fee → Bar pool (barLiquorPct × liquor
+ * sales) → kitchen pool (kitchenPct × tips-after-fees) and FOH pool
+ * (remainder − busser cut) → per-person splits.
  *
  * When roundToDollar is true, every computed amount (CC fees, each pool) is
  * rounded to the nearest whole dollar before use, so all displayed values and
@@ -116,21 +119,21 @@ export function calculate(input: CalculatorInput, rng: () => number = Math.rando
 
   const ccFeesCents             = toDollars(Math.round(grossTipsCents * config.ccFeeRate));
   const tipsAfterFeesCents      = grossTipsCents - ccFeesCents;
-  const kitchenPoolCents        = toDollars(Math.round(tipsAfterFeesCents * config.kitchenPct));
-  const remainingAfterKitchenCents = tipsAfterFeesCents - kitchenPoolCents;
 
 const fohStaff     = staff.filter(s => s.role === 'FOH');
 const kitchenStaff = staff.filter(s => s.role === 'Kitchen');
 const barStaff     = staff.filter(s => s.role === 'Bar');
 const busserStaff  = staff.filter(s => s.role === 'Busser');
 
-  // Bussers take a fixed per-person cut from the post-kitchen remainder, before
-  // the bar/FOH split. Bussers do NOT share the FOH pool. The rate is a whole
-  // dollar amount, so it needs no rounding.
-  const busserPoolCents            = busserRateCents * busserStaff.length;
-  const remainingAfterBusserCents  = remainingAfterKitchenCents - busserPoolCents;
-  const barPoolCents            = toDollars(Math.round(liquorSalesCents * config.barLiquorPct));
-  const fohPoolCents            = remainingAfterBusserCents - barPoolCents;
+  // Order of operations: Tip → CC fee → Bar pool (barLiquorPct × liquor sales)
+  // → 50/50-style split of the remainder into kitchen and FOH pools →
+  // busser fixed cut from the FOH side. Kitchen % applies to tips after
+  // fees (the bar deduction does not change its base).
+  const barPoolCents             = toDollars(Math.round(liquorSalesCents * config.barLiquorPct));
+  const remainingAfterBarCents   = tipsAfterFeesCents - barPoolCents;
+  const kitchenPoolCents         = toDollars(Math.round(tipsAfterFeesCents * config.kitchenPct));
+  const busserPoolCents          = busserRateCents * busserStaff.length;
+  const fohPoolCents             = remainingAfterBarCents - kitchenPoolCents - busserPoolCents;
 
   // Bar staff participate in the FOH pool split alongside FOH staff
   const fohPoolParticipants = [...fohStaff, ...barStaff];
@@ -187,9 +190,9 @@ for (let i = 0; i < kitchenStaff.length; i++) {
   }
 
   return {
-    grossTipsCents, ccFeesCents, tipsAfterFeesCents, kitchenPoolCents,
-    remainingAfterKitchenCents, busserPoolCents, remainingAfterBusserCents,
-    liquorSalesCents, barPoolCents, fohPoolCents,
+    grossTipsCents, ccFeesCents, tipsAfterFeesCents,
+    barPoolCents, remainingAfterBarCents, kitchenPoolCents,
+    busserPoolCents, fohPoolCents,
     fohStaffCount: fohStaff.length, fohPoolParticipantCount: fohPoolParticipants.length,
     kitchenStaffCount: kitchenStaff.length, barStaffCount: barStaff.length,
     busserStaffCount: busserStaff.length,

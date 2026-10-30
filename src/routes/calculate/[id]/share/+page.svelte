@@ -20,13 +20,13 @@
       '',
       `Gross Tips:      $${formatCents(c.gross_tips_cents)}`,
       `CC Fees:        −$${formatCents(c.cc_fees_cents)}`,
-      `Kitchen Pool:    $${formatCents(c.kitchen_pool_cents)}`,
     ];
     if (c.bar_pool_cents > 0) {
-      lines.push(`Bar Pool:        $${formatCents(c.bar_pool_cents)}`);
+      lines.push(`Bar Pool:        −$${formatCents(c.bar_pool_cents)}`);
     }
+    lines.push(`Kitchen Pool:    $${formatCents(c.kitchen_pool_cents)}`);
     if (c.busser_pool_cents > 0) {
-      lines.push(`Busser Pool:     $${formatCents(c.busser_pool_cents)}`);
+      lines.push(`Busser Pool:     −$${formatCents(c.busser_pool_cents)}`);
     }
     lines.push('');
     for (const d of sorted) {
@@ -72,20 +72,20 @@
         <span>CC Fees</span>
         <span class="money">−${formatCents(c.cc_fees_cents)}</span>
       </div>
+      {#if c.bar_pool_cents > 0}
+        <div class="sum-row dim">
+          <span>Bar Pool</span>
+          <span class="money">−${formatCents(c.bar_pool_cents)}</span>
+        </div>
+      {/if}
       <div class="sum-row dim">
         <span>Kitchen Pool</span>
         <span class="money">${formatCents(c.kitchen_pool_cents)}</span>
       </div>
-      {#if c.bar_pool_cents > 0}
-        <div class="sum-row dim">
-          <span>Bar Pool</span>
-          <span class="money">${formatCents(c.bar_pool_cents)}</span>
-        </div>
-      {/if}
       {#if c.busser_pool_cents > 0}
         <div class="sum-row dim">
           <span>Busser Pool</span>
-          <span class="money">${formatCents(c.busser_pool_cents)}</span>
+          <span class="money">−${formatCents(c.busser_pool_cents)}</span>
         </div>
       {/if}
     </section>

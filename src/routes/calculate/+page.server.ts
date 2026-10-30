@@ -111,7 +111,7 @@ export const actions: Actions = {
 
     const calcId = db.transaction(() => {
       const { lastInsertRowid } = insertCalc.run(
-        date, shift, result.grossTipsCents, result.liquorSalesCents,
+        date, shift, result.grossTipsCents, liquorSalesCents,
         config.ccFeeRate, config.kitchenPct, config.barLiquorPct,
         result.ccFeesCents, result.tipsAfterFeesCents,
         result.kitchenPoolCents, result.barPoolCents, result.busserPoolCents, result.fohPoolCents

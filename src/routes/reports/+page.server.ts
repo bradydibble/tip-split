@@ -288,7 +288,7 @@ export const actions: Actions = {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         report.business_date, report.shift_type,
-        result.grossTipsCents, result.liquorSalesCents,
+        result.grossTipsCents, totalLiquor,
         config.ccFeeRate, config.kitchenPct, config.barLiquorPct,
         result.ccFeesCents, result.tipsAfterFeesCents,
         result.kitchenPoolCents, result.barPoolCents,
