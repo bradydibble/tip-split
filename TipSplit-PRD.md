@@ -39,17 +39,18 @@ Tips are calculated per shift (Lunch and Dinner are independent). The cutoff bet
 |------|---------|-------|
 | 1. CC Fees | Gross Tips × CC fee rate (default 2.5%) | Deducted first |
 | 2. Tips After Fees | Gross Tips − CC Fees | |
-| 3. Kitchen Pool | Tips After Fees × Kitchen % (default 5%) | |
-| 4. Remaining | Tips After Fees − Kitchen Pool | |
-| 5. Bar Pool | Liquor Sales × Bar % (default 10%) | Sourced from Remaining |
-| 6. FOH Pool | Remaining − Bar Pool | |
-| 7. FOH Split | FOH Pool ÷ number of FOH staff | Bartenders excluded from FOH pool |
-| 8. Kitchen Split | Kitchen Pool ÷ number of Kitchen staff | |
-| 9. Bar Split | Bar Pool ÷ number of Bar staff | Bartenders receive this only |
+| 3. Bar Pool | Liquor Sales × Bar % (default 10%) | Deducted before the kitchen/FOH split |
+| 4. After Bar | Tips After Fees − Bar Pool | |
+| 5. Kitchen Pool | Tips After Fees × Kitchen % (default 5%) | Base is Tips After Fees; bar deduction does not change it |
+| 6. FOH Pool | After Bar − Kitchen Pool − Busser Pool | |
+| 7. Busser Pool | Busser rate × number of bussers | Fixed per-person cut from the FOH side |
+| 8. FOH Split | FOH Pool ÷ number of FOH staff | Bartenders excluded from FOH pool |
+| 9. Kitchen Split | Kitchen Pool ÷ number of Kitchen staff | |
+| 10. Bar Split | Bar Pool ÷ number of Bar staff | Bartenders receive this only |
 
 **Rounding:** All per-person payouts are whole dollar amounts. Each pool is rounded to the nearest dollar (Math.round) before splitting. When a pool doesn't divide evenly, remainder dollars are randomly distributed (+$1 to random recipients) so no one gets shorted more than $1. This matches the cash-envelope workflow.
 
-**Bartender model:** Bartenders receive only their share of the Bar Pool. They are not counted in the FOH pool. This prevents bartenders from diluting the FOH servers' share.
+**Bartender model:** Bartenders receive their Bar Pool share and also share the FOH pool equally with FOH staff.
 
 **Configurable parameters:**
 

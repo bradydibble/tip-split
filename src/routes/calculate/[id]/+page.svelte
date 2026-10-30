@@ -120,16 +120,16 @@ const submitAdjustment = () => {
       <div class="row total"><span>Tips After Fees</span><span class="money">${formatCents(c.tips_after_fees_cents)}</span></div>
     </div>
 
-    <!-- Pool breakdown -->
+    <!-- Pool breakdown — order: Tip → CC fee → Bar → kitchen/FOH split → busser -->
     <div class="card">
       <p class="label">Pool Breakdown</p>
-      <div class="row muted"><span>Kitchen Pool ({(c.kitchen_pct * 100).toFixed(0)}%)</span><span class="money">${formatCents(c.kitchen_pool_cents)}</span></div>
-      <div class="row"><span>After Kitchen Pool</span><span class="money">${formatCents(c.tips_after_fees_cents - c.kitchen_pool_cents)}</span></div>
+      <div class="row muted"><span>Liquor Sales</span><span class="money">${formatCents(c.liquor_sales_cents)}</span></div>
+      <div class="row muted"><span>Bar Pool ({(c.bar_liquor_pct * 100).toFixed(0)}% of liquor)</span><span class="money">−${formatCents(c.bar_pool_cents)}</span></div>
+      <div class="row"><span>After Bar Pool</span><span class="money">${formatCents(c.tips_after_fees_cents - c.bar_pool_cents)}</span></div>
+      <div class="row muted"><span>Kitchen Pool ({(c.kitchen_pct * 100).toFixed(0)}%)</span><span class="money">−${formatCents(c.kitchen_pool_cents)}</span></div>
       {#if c.busser_pool_cents > 0}
         <div class="row muted"><span>Busser Pool ({busserDists.length} × ${formatCents(c.busser_pool_cents / busserDists.length)})</span><span class="money">−${formatCents(c.busser_pool_cents)}</span></div>
       {/if}
-      <div class="row muted"><span>Liquor Sales</span><span class="money">${formatCents(c.liquor_sales_cents)}</span></div>
-      <div class="row muted"><span>Bar Pool ({(c.bar_liquor_pct * 100).toFixed(0)}% of liquor)</span><span class="money">${formatCents(c.bar_pool_cents)}</span></div>
       <div class="row total"><span>FOH Pool</span><span class="money">${formatCents(c.foh_pool_cents)}</span></div>
     </div>
 

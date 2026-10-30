@@ -13,18 +13,18 @@ Order of operations the diagram MUST honor (matches calculator):
 GROSS_TIPS
   − CC_FEES                 (gross × ccFeeRate, rounded to $)
   = TIPS_AFTER_FEES
-  − KITCHEN_POOL            (tips_after_fees × kitchenPct, rounded)
-  − BUSSER_POOL             (busserRateCents × busserStaff.count, FLAT)
   − BAR_POOL                (liquorSalesCents × barLiquorPct, rounded — INDEPENDENT basis)
+  = AFTER_BAR
+  − KITCHEN_POOL            (tips_after_fees × kitchenPct, rounded — bar does not change its base)
+  − BUSSER_POOL             (busserRateCents × busserStaff.count, FLAT — from the FOH side)
   = FOH_POOL                (the residue)
 ```
 
-Note: BAR_POOL basis is liquor sales, NOT the post-busser remainder, but
-arithmetically `fohPool = remainingAfterBusser − barPool`. The diagram carves
-bar LAST before showing the residue because that is how the algebra resolves
-— but the bar stream LABEL must state "% of liquor" so nobody mistakes its
-basis. This subtlety is the only place the viz risks lying; handle it by
-annotating, not by reordering.
+Note: BAR_POOL basis is liquor sales, NOT the post-fee tips. It is carved
+FIRST, before the kitchen/FOH split; the kitchen pool's base remains tips
+after fees, so `fohPool = afterBar − kitchenPool − busserPool`. The diagram
+carves bar first, then kitchen and busser, and shows the residue. The bar
+stream LABEL must state "% of liquor" so nobody mistakes its basis.
 
 ---
 
@@ -476,8 +476,8 @@ Two valid scenarios depending on `kitchen_pct`:
   adjustment downstream failure. Do NOT silently swallow the cash.
 
 ### 6.7 Zero FOH pool participants (`fohStaff.length + barStaff.length === 0`)
-Mirror 6.6 dangerous scenario. The `remainingAfterBusser − barPool`
-balance sits undistributable: render a `#c66` reservoir pill tagged
+Mirror 6.6 dangerous scenario. The `fohPool` balance (after bar, kitchen,
+and the busser cut) sits undistributable: render a `#c66` reservoir pill tagged
 `"UNCLAIMED — no FOH/bar staff"` draining visibly into a `#c66` footnote.
 Never suppress a positive undistributed amount — conservation honesty
 trumps tidiness.
@@ -564,11 +564,9 @@ during build. My preference if forced: keep per-person only — it preserves
 focus on the specific exception the user came to investigate.
 
 ### 7.8 Determinism of `foh` vs `bar` carving order
-Math permits either sequence (kit → bus → bar → foh OR kit → bus → "fOh &
-bar treated in parallel"). The CALCULATOR carves bar before resolving foh
-as the residue, so the diagram echoes that — sequential carving. A pedant
-might argue bar should split out BEFORE the residual declaration reads as
-arithmetic-imprecise. Trust the calculator; do not reorder.
+The CALCULATOR carves bar first (before the kitchen/FOH split), then kitchen,
+then the busser cut from the FOH side, leaving FOH as the residue; the
+diagram echoes that sequential carving. Trust the calculator; do not reorder.
 
 ### 7.9 Whether to honor in-viz correction when `cc_fees_cents !== gross × ccFeeRate` (post-rounding)
 Due to `toDollars` rounding the fee, the displayed fee may differ slightly

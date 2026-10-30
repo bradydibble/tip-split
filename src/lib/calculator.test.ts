@@ -42,13 +42,14 @@ describe('calculate — intermediate amounts', () => {
     expect(r.tipsAfterFeesCents).toBe(96500); // $965
   });
 
-  it('kitchenPool = $965 × 5% = $48.25', () => {
-    expect(r.kitchenPoolCents).toBe(4825);
-    expect(r.remainingAfterKitchenCents).toBe(91675); // $916.75
+  it('barPool = $965 liquor × 10% = $96.50 — deducted before the kitchen/FOH split', () => {
+    expect(r.barPoolCents).toBe(9650);
+    expect(r.remainingAfterBarCents).toBe(96500 - 9650); // $868.50
   });
 
-  it('barPool = $965 × 10% = $96.50', () => {
-    expect(r.barPoolCents).toBe(9650);
+  it('kitchenPool = $965 × 5% = $48.25 (base is tips after fees; bar does not change it)', () => {
+    expect(r.kitchenPoolCents).toBe(4825);
+    expect(r.fohPoolCents).toBe(86850 - 4825); // $820.25
   });
 
   it('fohPool = $916.75 − $96.50 = $820.25', () => {
@@ -215,11 +216,11 @@ describe('calculate — bussers', () => {
     });
   });
 
-  it('busser pool is deducted after kitchen, before the bar/FOH split', () => {
-    expect(r.remainingAfterKitchenCents).toBe(91675);       // $916.75
-    expect(r.remainingAfterBusserCents).toBe(91675 - 4000); // $876.75
-    expect(r.barPoolCents).toBe(9650);
-    expect(r.fohPoolCents).toBe(91675 - 4000 - 9650);       // $780.25 (was $820.25 w/o bussers)
+  it('bar deducted before the split; busser cut comes from the FOH side', () => {
+    expect(r.barPoolCents).toBe(9650);                      // 10% of $965 liquor
+    expect(r.remainingAfterBarCents).toBe(96500 - 9650);    // $868.50
+    expect(r.kitchenPoolCents).toBe(4825);                  // unchanged: 5% of tips after fees
+    expect(r.fohPoolCents).toBe(86850 - 4825 - 4000);       // $780.25 (was $820.25 w/o bussers)
   });
 
   it('bussers do NOT participate in the FOH pool', () => {
