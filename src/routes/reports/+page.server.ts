@@ -6,6 +6,7 @@ import { DEFAULT_TIMEZONE } from '$lib/business-date';
 import { calculate } from '$lib/calculator';
 import { resyncReport } from '$lib/server/square/resync';
 import { localToUtc } from '$lib/server/square/shift-import';
+import { addDays } from '$lib/pay-period';
 import type { ShiftReportRow, ShiftReportAttendanceRow } from '$lib/server/db';
 
 export const load: PageServerLoad = ({ locals, url }) => {
@@ -184,8 +185,19 @@ export const actions: Actions = {
       }
       dinnerCloseLocal = weeklyClose ?? settings.dinner_close ?? '21:00';
     }
+    // A close time earlier than the lunch cutoff (or earlier than noon) is a
+    // past-midnight close for this business date (e.g. '02:00' after a late
+    // Friday service). It lands on the NEXT calendar day while still counting
+    // toward this business date's dinner window — the 3 AM business-day rule.
+    // Compare numerically, not lexically ('02:00' < '21:00' lexically too).
+    const [closeH, closeM] = dinnerCloseLocal.split(':').map(Number);
+    const [cutoffH, cutoffM] = (settings.lunch_cutoff ?? '15:00').split(':').map(Number);
+    const dinnerCloseSpansMidnight = closeH * 60 + closeM <= cutoffH * 60 + cutoffM;
+    const dinnerCloseDate = dinnerCloseSpansMidnight
+      ? addDays(report.business_date, 1)
+      : report.business_date;
     const dinnerClose = localToUtc(
-      report.business_date,
+      dinnerCloseDate,
       dinnerCloseLocal,
       timeZone
     );

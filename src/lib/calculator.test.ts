@@ -185,6 +185,29 @@ describe('calculate — edge cases', () => {
   });
 });
 
+// ── Negative liquor (net returns) ────────────────────────────────────────────
+describe('calculate — negative liquor sales', () => {
+  it('bar pool clamps at zero when net returns exceed liquor sales', () => {
+    const r = calculate({
+      ...BASE_INPUT,
+      liquorSalesCents: -50000, // returns exceed sales → 10% = -$50
+      config: { ...BASE_INPUT.config, roundToDollar: false },
+    });
+    expect(r.barPoolCents).toBe(0);
+    // FOH pool is NOT inflated by the negative bar amount:
+    expect(r.remainingAfterBarCents).toBe(96500);
+    expect(r.fohPoolCents).toBe(96500 - 4825);
+  });
+
+  it('clamping holds in roundToDollar mode too', () => {
+    const r = calculate({
+      ...BASE_INPUT,
+      liquorSalesCents: -96500, // 10% rounds to -$97
+    });
+    expect(r.barPoolCents).toBe(0);
+  });
+});
+
 // ── Bussers ─────────────────────────────────────────────────────────────────
 // Busser = fixed per-person cut from the post-kitchen remainder, taken before
 // the bar/FOH split. Bussers do NOT share the FOH pool.

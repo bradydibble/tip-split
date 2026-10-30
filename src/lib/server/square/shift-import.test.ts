@@ -288,3 +288,27 @@ describe('createOrGetReport', () => {
     expect(report.state).toBe('READY_FOR_REVIEW');
   });
 });
+
+// ── Window arithmetic helpers ───────────────────────────────────────────────
+// The dinner window crosses midnight when the close time is at or before the
+// lunch cutoff: a '02:00' close on business date D means 02:00 on D+1.
+// The date arithmetic lives in reports/+page.server.ts; verify the pieces
+// (localToUtc on the shifted date + addDays) compose to the right instants.
+describe('dinner window across midnight', () => {
+  it('localToUtc on business_date+1 lands the 02:00 close on the next calendar day', () => {
+    // Friday 2026-10-30 business date, close '02:00' → Saturday 2026-10-31T02:00 PDT
+    const utc = shiftImport.localToUtc('2026-10-31', '02:00', TZ);
+    expect(utc).toBe('2026-10-31T09:00:00.000Z'); // 02:00 PDT = 09:00 UTC
+  });
+
+  it('same close on the business date itself would land on the wrong day (regression guard)', () => {
+    // 02:00 interpreted ON the business date = early-morning Friday, before service
+    const wrong = shiftImport.localToUtc('2026-10-30', '02:00', TZ);
+    expect(wrong).toBe('2026-10-30T09:00:00.000Z');
+  });
+
+  it('normal 21:00 close stays on the business date', () => {
+    const utc = shiftImport.localToUtc('2026-10-30', '21:00', TZ);
+    expect(utc).toBe('2026-10-31T04:00:00.000Z'); // 21:00 PDT = 04:00 UTC next day
+  });
+});
