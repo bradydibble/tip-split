@@ -770,14 +770,14 @@ export function buildWorkedShiftsResponse(businessDate: string): {
       mk('WS-closed-1', TM_SERVER_A, '10:30', '14:30', 1800, { title: 'Cashier', declaredCashCents: 1200 }),
       // Closed double-length shift with 30min unpaid meal break — 6h30 worked of 7h
       mk('WS-closed-2', TM_COOK_B, '10:00', '17:00', 2200, {
-        title: 'Kitchen', unpaidBreak: ['12:00', '12:30'],
+        title: 'Kitchen', jobId: 'JOB-cook', unpaidBreak: ['12:00', '12:30'],
       }),
       // Overnight-kitchen style later shift
-      mk('WS-closed-3', TM_BARKEEP, '17:00', '23:00', 2400, { title: 'Bartender', declaredCashCents: 3000 }),
+      mk('WS-closed-3', TM_BARKEEP, '17:00', '23:00', 2400, { title: 'Bartender', jobId: 'JOB-bartender', declaredCashCents: 3000 }),
       // Salaried-rate shift (implied hourly from annual)
       mk('WS-closed-4', TM_MANAGER_X, '09:00', '17:00', 3000, { title: 'Operations Manager', jobId: 'JOB-salary' }),
       // OPEN shift (clocked in, not yet out) — provisional cost
-      mk('WS-open-1', TM_BUSBOY, '11:00', null, 1600, { title: 'Busser' }),
+      mk('WS-open-1', TM_BUSBOY, '11:00', null, 1600, { title: 'Busser', jobId: 'JOB-busser' }),
     ],
   };
 }

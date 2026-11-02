@@ -136,6 +136,7 @@ export class SquareWriteGuardError extends Error {
 interface MockState {
   teamMembersOverride?: typeof buildTeamMembersResponse;
   scheduledShiftsOverride?: () => ReturnType<typeof buildScheduledShiftsResponse>;
+  workedShiftsOverride?: () => ReturnType<typeof buildWorkedShiftsResponse>;
 }
 
 const mockState: MockState = {};
@@ -150,10 +151,17 @@ export function __setMockScheduledShifts(
 ): void {
   mockState.scheduledShiftsOverride = fn;
 }
+/** Replace the fixture-generated worked shifts / clock-ins (test injection). */
+export function __setMockWorkedShifts(
+  fn: () => ReturnType<typeof buildWorkedShiftsResponse>
+): void {
+  mockState.workedShiftsOverride = fn;
+}
 /** Reset mock overrides (call in test afterEach). */
 export function __resetMockOverrides(): void {
   mockState.teamMembersOverride = undefined;
   mockState.scheduledShiftsOverride = undefined;
+  mockState.workedShiftsOverride = undefined;
 }
 
 /**
@@ -218,6 +226,9 @@ async function mockTransport(
       return { json: buildCatalogResponse(), requestId };
 
     case 'SearchWorkedShifts': {
+      if (mockState.workedShiftsOverride) {
+        return { json: mockState.workedShiftsOverride(), requestId };
+      }
       // Body carries the workday date range; extract the business date.
       const wb = req.queryBody as {
         query?: { filter?: { workday?: { date_range?: { start_at?: string } } } };

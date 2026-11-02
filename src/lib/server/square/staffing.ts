@@ -10,8 +10,12 @@
 // Resolution order:
 //   1. An existing shift report for (location, business_date, shift_type)
 //      whose attendance has been generated — the reviewed record wins.
-//   2. Otherwise a live, read-only fetch of published+assigned Square
-//      scheduled shifts, partitioned into the requested business window.
+//   2. Otherwise a live, read-only fetch of ACTUAL clock-ins (worked
+//      shifts) for the business day, partitioned into the requested
+//      window. Clock-ins are who actually showed up — the schedule is
+//      only the fallback when nobody has clocked in.
+//   3. Fallback: published+assigned Square scheduled shifts, same as
+//      before the clock-in switch.
 //      Nothing is persisted here; the scheduler owns report creation.
 //
 // The result is advisory: the calculate screen uses it to DEFAULT the
@@ -20,7 +24,7 @@
 
 import db from '../db';
 import { loadSquareConfig } from './config';
-import { searchScheduledShifts } from './client';
+import { searchScheduledShifts, searchWorkedShifts } from './client';
 import {
   partitionShifts,
   businessDayWindowUtc,
@@ -28,7 +32,7 @@ import {
   LUNCH_BOUNDARY_HOUR,
   LUNCH_BOUNDARY_MINUTE,
 } from './shift-import';
-import type { SquareScheduledShift } from './fixtures';
+import type { SquareScheduledShift, SquareWorkedShift } from './fixtures';
 
 /** A scheduled person resolved to a local roster row. */
 export interface StaffedPerson {
@@ -50,11 +54,12 @@ export interface UnmatchedScheduledPerson {
 }
 
 export type StaffingSource =
-  | 'shift_report'    // served from a generated shift report's attendance
-  | 'square_live'     // live read-only fetch of scheduled shifts
-  | 'not_configured'  // no Square token
-  | 'no_location'     // token present but no location selected
-  | 'no_schedule';    // location selected, nothing published for this window
+  | 'shift_report'       // served from a generated shift report's attendance
+  | 'square_clocked_in'  // live read-only fetch of actual clock-ins
+  | 'square_live'        // live read-only fetch of scheduled shifts (fallback)
+  | 'not_configured'     // no Square token
+  | 'no_location'        // token present but no location selected
+  | 'no_schedule';       // location selected, nothing published for this window
 
 export interface ShiftStaffing {
   /** True when staffing data exists for the requested date + shift. */
@@ -140,6 +145,21 @@ export async function getShiftStaffing(
 
   // 2) Live read-only fetch. Nothing is persisted by this path.
   const { startUtc, endUtc } = businessDayWindowUtc(businessDateStr, timeZone);
+
+  // 2a) Actual clock-ins first — who really showed up beats who was
+  // supposed to. The workday filter uses INTERSECTION so shifts straddling
+  // midnight land in both days; the window partition below attributes them.
+  const { shifts: workedShifts } = await searchWorkedShifts(
+    locationId, timeZone, startUtc, endUtc
+  );
+  const clockedIn = staffingFromWorkedShifts(workedShifts, shiftType, timeZone);
+  // Any clock-in for the day means the clock-in record is the source of
+  // truth — even when nobody is includable (all excluded / unsynced),
+  // falling back to the schedule would paper over who actually showed up.
+  if (workedShifts.length > 0) return clockedIn;
+
+  // 2b) Nobody clocked in (pre-service, or Square shifts disabled):
+  // fall back to the published schedule.
   const { scheduled_shifts } = await searchScheduledShifts(locationId, startUtc, endUtc);
   // A shift that spans the Lunch/Dinner boundary staffs BOTH windows —
   // someone scheduled 12:00–21:00 worked the lunch service and the dinner
@@ -214,6 +234,136 @@ function staffingFromReportAttendance(
   return {
     available: staffed.length > 0,
     source: 'shift_report',
+    staffed,
+    notInRoster,
+    excluded,
+  };
+}
+
+/**
+ * Partition clock-ins (worked shifts) into the requested window and resolve
+ * them to roster people. Position comes from the job on the clock-in shift
+ * with the most overlap in the window (ties → the later shift), mirroring
+ * the scheduled-shift rule. A shift still OPEN counts through the end of
+ * the day (they are on the clock now). A shift spanning the Lunch/Dinner
+ * boundary staffs BOTH windows, same as the schedule does.
+ */
+function staffingFromWorkedShifts(
+  shifts: SquareWorkedShift[],
+  window: 'Lunch' | 'Dinner',
+  timeZone: string
+): ShiftStaffing {
+  const staffed: StaffedPerson[] = [];
+  const notInRoster: UnmatchedScheduledPerson[] = [];
+  const excluded: UnmatchedScheduledPerson[] = [];
+
+  const jobTitleStmt = db.prepare(
+    'SELECT square_job_title FROM staff_square_jobs WHERE square_job_id = ? AND active = 1 LIMIT 1'
+  );
+  const rosterStmt = db.prepare(
+    `SELECT id, name, staff_code, default_tip_split_role, role_mapping_state
+     FROM staff WHERE square_team_member_id = ?`
+  );
+  const jobRoleStmt = db.prepare(
+    `SELECT mapped_tip_role FROM staff_square_jobs
+     WHERE staff_id = ? AND square_job_id = ? AND active = 1 LIMIT 1`
+  );
+
+  const boundary = LUNCH_BOUNDARY_HOUR * 60 + LUNCH_BOUNDARY_MINUTE;
+
+  /** Minutes this clock-in spends inside the requested window (local clock). */
+  const overlapMinutes = (sh: SquareWorkedShift): number => {
+    const s = shiftLocalParts(sh.start_at, timeZone);
+    const startMin = s.hour * 60 + s.minute;
+    const e = sh.end_at ? shiftLocalParts(sh.end_at, timeZone) : null;
+    const endMin = e ? e.hour * 60 + e.minute : 24 * 60; // OPEN → through end of day
+    // Overnight CLOSED shifts belong to Dinner entirely (partition rule).
+    if (sh.end_at && endMin <= startMin) {
+      return window === 'Dinner' ? endMin + 24 * 60 - startMin : 0;
+    }
+    if (window === 'Lunch') return Math.max(0, Math.min(endMin, boundary) - startMin);
+    return Math.max(0, endMin - Math.max(startMin, boundary));
+  };
+  const startMinutes = (sh: SquareWorkedShift): number => {
+    const p = shiftLocalParts(sh.start_at, timeZone);
+    return p.hour * 60 + p.minute;
+  };
+
+  const byPerson = new Map<string, SquareWorkedShift[]>();
+  for (const sh of shifts) {
+    if (!sh.team_member_id) continue;
+    const list = byPerson.get(sh.team_member_id) ?? [];
+    list.push(sh);
+    byPerson.set(sh.team_member_id, list);
+  }
+
+  for (const [teamMemberId, personShifts] of byPerson) {
+    // Longest window overlap wins; ties → the later clock-in (the position
+    // they close in). Shifts without a job id still count for attendance —
+    // the role falls back to the roster default.
+    const withJob = personShifts.filter((sh) => sh.wage?.job_id);
+    const pool = withJob.length > 0 ? withJob : personShifts;
+    const chosen = pool.reduce((best, sh) => {
+      const so = overlapMinutes(sh), bo = overlapMinutes(best);
+      const ss = startMinutes(sh), bs = startMinutes(best);
+      return so > bo || (so === bo && ss > bs) ? sh : best;
+    }, pool[0]);
+
+    const chosenJobId = chosen.wage?.job_id ?? null;
+    // The day-range search (INTERSECTION) returns shifts that merely graze
+    // this business day; a clock-in with no minutes inside the requested
+    // window did not work this shift — skip before any inclusion decision.
+    if (overlapMinutes(chosen) === 0) continue;
+    const jobTitle = chosenJobId
+      ? ((jobTitleStmt.get(chosenJobId) as { square_job_title: string } | undefined)
+          ?.square_job_title ?? chosen.wage?.title ?? null)
+      : null;
+
+    const rosterRow = rosterStmt.get(teamMemberId) as
+      | {
+          id: number;
+          name: string;
+          staff_code: string | null;
+          default_tip_split_role: string | null;
+          role_mapping_state: string | null;
+        }
+      | undefined;
+
+    if (!rosterRow) {
+      // Clocked in but never synced into the local roster — count only.
+      notInRoster.push({ name: null, scheduledJobTitle: jobTitle });
+      continue;
+    }
+
+    // Same position rule as the schedule: the clock-in shift's job wins,
+    // the roster default is only the fallback for job-less shifts.
+    const jobRole = chosenJobId
+      ? ((jobRoleStmt.get(rosterRow.id, chosenJobId) as
+          | { mapped_tip_role: string }
+          | undefined)?.mapped_tip_role ?? null)
+      : null;
+
+    if (jobRole === 'EXCLUDED') {
+      excluded.push({ name: rosterRow.name, scheduledJobTitle: jobTitle });
+      continue;
+    }
+    if (!jobRole && rosterRow.default_tip_split_role === 'EXCLUDED') {
+      excluded.push({ name: rosterRow.name, scheduledJobTitle: jobTitle });
+      continue;
+    }
+
+    staffed.push({
+      staffId: rosterRow.id,
+      name: rosterRow.name,
+      staffCode: rosterRow.staff_code,
+      suggestedRole: normalizeRole(jobRole ?? rosterRow.default_tip_split_role),
+      scheduledJobTitle: jobTitle,
+    });
+  }
+
+  return {
+    available: staffed.length > 0,
+    source: 'square_clocked_in',
     staffed,
     notInRoster,
     excluded,
