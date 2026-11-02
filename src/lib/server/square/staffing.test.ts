@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -12,6 +12,7 @@ let staffing: typeof import('./staffing');
 let db: typeof import('../db').default;
 let fixtures: typeof import('./fixtures');
 let setMockShifts: typeof import('./client').__setMockScheduledShifts;
+let setMockWorked: typeof import('./client').__setMockWorkedShifts;
 let resetMock: typeof import('./client').__resetMockOverrides;
 
 afterEach(() => resetMock());
@@ -41,7 +42,7 @@ beforeAll(async () => {
   staffing = await import('./staffing');
   db = (await import('../db')).default;
   fixtures = await import('./fixtures');
-  ({ __setMockScheduledShifts: setMockShifts, __resetMockOverrides: resetMock } = await import('./client'));
+  ({ __setMockScheduledShifts: setMockShifts, __setMockWorkedShifts: setMockWorked, __resetMockOverrides: resetMock } = await import('./client'));
 
   ROSTER = [
     { name: 'Pat Mixwell', role: 'Bar', code: 'TS-4001', tm: fixtures.TM_BARKEEP, defaultRole: 'BAR', state: 'MAPPED' },
@@ -91,49 +92,51 @@ afterAll(() => {
 const staffIdOf = (tm: string): number =>
   (db.prepare('SELECT id FROM staff WHERE square_team_member_id = ?').get(tm) as { id: number }).id;
 
-describe('getShiftStaffing — live Square schedule (mock transport)', () => {
-  it('defaults Lunch to the scheduled lunch crew with Square-suggested roles', async () => {
+describe('getShiftStaffing — live Square clock-ins (mock transport)', () => {
+  // Fixture clock-ins (2026-08-27):
+  //   Jordan 10:30–14:30 Cashier · Sam 10:00–17:00 Kitchen · Pat 17:00–23:00
+  //   Bartender · Alex 09:00–17:00 Ops Manager (excluded) · busser OPEN 11:00
+  // None of the fixture job ids map in staff_square_jobs, so roles fall back
+  // to each person's roster default.
+  it('defaults Lunch to who actually clocked in, not the schedule', async () => {
     const result = await staffing.getShiftStaffing('2026-08-27', 'Lunch');
 
     expect(result.available).toBe(true);
-    expect(result.source).toBe('square_live');
-    expect(result.staffed.map(p => p.staffId).sort())
-      .toEqual([staffIdOf(fixtures.TM_BARKEEP), staffIdOf(fixtures.TM_SERVER_A)].sort());
-
-    const pat = result.staffed.find(p => p.name === 'Pat Mixwell');
-    expect(pat?.suggestedRole).toBe('BAR');
-    expect(pat?.scheduledJobTitle).toBe('Bartender');
-    expect(pat?.staffCode).toBe('TS-4001');
+    expect(result.source).toBe('square_clocked_in');
+    expect(result.staffed.map(p => p.name)).toEqual(['Jordan Carries', 'Sam Grills']);
 
     const jordan = result.staffed.find(p => p.name === 'Jordan Carries');
     expect(jordan?.suggestedRole).toBe('FOH');
+    expect(jordan?.scheduledJobTitle).toBe('Cashier');
+    expect(jordan?.staffCode).toBe('TS-4002');
 
-    expect(result.notInRoster).toEqual([]);
-    // The manager's all-day shift spans the boundary, so with dual
-    // assignment they are excluded from Lunch as well as Dinner.
+    expect(result.notInRoster).toEqual([
+      { name: null, scheduledJobTitle: 'Busser' }, // OPEN shift, not in roster
+    ]);
     expect(result.excluded).toEqual([
-      { name: 'Alex Leads', scheduledJobTitle: 'Manager' },
+      { name: 'Alex Leads', scheduledJobTitle: 'Operations Manager' },
     ]);
   });
 
-  it('defaults Dinner to its crew, excluding role-mapped managers and flagging unsynced people', async () => {
+  it('defaults Dinner to its clock-in crew, dual-assigning boundary spanners', async () => {
     const result = await staffing.getShiftStaffing('2026-08-27', 'Dinner');
 
-    expect(result.available).toBe(true);
+    expect(result.source).toBe('square_clocked_in');
+    // Sam's 10:00–17:00 clock-in spans the boundary → both windows; Pat's
+    // 17:00–23:00 is dinner-only. Jordan clocked out before the boundary.
+    expect(result.staffed.map(p => p.name)).toEqual(['Sam Grills', 'Pat Mixwell']);
+    expect(result.staffed.find(p => p.name === 'Pat Mixwell')?.suggestedRole).toBe('BAR');
+    expect(result.excluded.map(p => p.name)).toEqual(['Alex Leads']);
+  });
+
+  it('falls back to the published schedule when nobody has clocked in', async () => {
+    setMockWorked(() => ({ shifts: [] }));
+
+    const result = await staffing.getShiftStaffing('2026-08-27', 'Lunch');
     expect(result.source).toBe('square_live');
-    expect(result.staffed.map(p => p.staffId).sort())
-      .toEqual([staffIdOf(fixtures.TM_BARKEEP), staffIdOf(fixtures.TM_COOK_B)].sort());
-
-    // Alex (manager) is scheduled but role-mapped EXCLUDED — never a default.
-    expect(result.excluded).toEqual([
-      { name: 'Alex Leads', scheduledJobTitle: 'Manager' },
-    ]);
-
-    // Robin is scheduled but was never synced into the roster (no staff
-    // row → no job-title link either).
-    expect(result.notInRoster).toEqual([
-      { name: null, scheduledJobTitle: null },
-    ]);
+    expect(result.staffed.map(p => p.name)).toEqual(['Pat Mixwell', 'Jordan Carries']);
+    expect(result.staffed.find(p => p.name === 'Pat Mixwell')?.scheduledJobTitle)
+      .toBe('Bartender');
   });
 
   // NOTE: the 'no_schedule' source (nothing published for a window) cannot
@@ -179,6 +182,7 @@ describe('getShiftStaffing — reviewed shift report wins over live schedule', (
   });
 
   it('falls back to the live schedule when the report has no attendance', async () => {
+    setMockWorked(() => ({ shifts: [] }));
     db.prepare(`
       INSERT INTO shift_reports (location_id, business_date, shift_type, state)
       VALUES (?, '2026-08-19', 'Lunch', 'DRAFT')
@@ -216,6 +220,10 @@ describe('getShiftStaffing — unconfigured deployments', () => {
 
 describe('getShiftStaffing — position from the scheduled job', () => {
   const BD = '2026-09-15';
+
+  // Clock-ins outrank the schedule; these tests exercise the schedule
+  // fallback specifically, so clear the fixture clock-ins.
+  beforeEach(() => setMockWorked(() => ({ shifts: [] })));
 
   function shiftAt(
     id: string,
@@ -363,6 +371,117 @@ describe('getShiftStaffing — position from the scheduled job', () => {
 
     const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
     expect(lunch.staffed.map(p => p.name)).toEqual(['Sam Grills']);
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.staffed.map(p => p.name)).toEqual(['Pat Mixwell']);
+  });
+});
+
+// ── Clock-in partitioning and position rules ─────────────────────────────────
+// The schedule is only the fallback now; the clock-in path has its own
+// edge cases worth pinning: OPEN shifts, job selection by window overlap,
+// overnight shifts, and job-less shifts.
+
+describe('getShiftStaffing — clock-in partitioning', () => {
+  const BD = '2026-10-05';
+
+  function workedAt(
+    id: string,
+    tm: string,
+    startLocal: string,
+    endLocal: string | null,
+    opts?: { title?: string; jobId?: string }
+  ): import('./fixtures').SquareWorkedShift {
+    return {
+      id,
+      team_member_id: tm,
+      employee_id: tm,
+      location_id: fixtures.TEST_LOCATION_ID,
+      timezone: TZ,
+      start_at: `${BD}T${startLocal}:00-07:00`,
+      end_at: endLocal ? `${BD}T${endLocal}:00-07:00` : undefined,
+      status: endLocal ? 'CLOSED' : 'OPEN',
+      wage: {
+        title: opts?.title ?? 'Cashier',
+        hourly_rate: { amount: 1800, currency: 'USD' },
+        job_id: opts?.jobId ?? 'JOB-cashier',
+        tip_eligible: true,
+      },
+      breaks: [],
+    };
+  }
+
+  it('counts a shift still OPEN as working through end of day', async () => {
+    setMockWorked(() => ({ shifts: [
+      workedAt('W1', fixtures.TM_BARKEEP, '15:30', null),
+    ]}));
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.source).toBe('square_clocked_in');
+    expect(dinner.staffed.map(p => p.name)).toEqual(['Pat Mixwell']);
+
+    // An OPEN 15:30 start has no lunch minutes at all.
+    const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
+    expect(lunch.available).toBe(false);
+    expect(lunch.staffed).toEqual([]);
+  });
+
+  it('picks the clock-in job spending the most time in the window', async () => {
+    // Pat holds bartender + food-runner jobs: 11:00–15:30 food runner
+    // (spans the boundary) then 16:00–21:00 bartender.
+    setMockWorked(() => ({ shifts: [
+      workedAt('W2a', fixtures.TM_BARKEEP, '11:00', '15:30', { title: 'Food Runner', jobId: 'JOB-food-runner' }),
+      workedAt('W2b', fixtures.TM_BARKEEP, '16:00', '21:00', { title: 'Bartender', jobId: 'JOB-bartender' }),
+    ]}));
+
+    const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
+    expect(lunch.staffed[0].suggestedRole).toBe('FOH');
+    expect(lunch.staffed[0].scheduledJobTitle).toBe('Food Runner');
+
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.staffed[0].suggestedRole).toBe('BAR');
+    expect(dinner.staffed[0].scheduledJobTitle).toBe('Bartender');
+  });
+
+  it('falls back to the roster default for a job-less clock-in', async () => {
+    const jobless = workedAt('W3', fixtures.TM_COOK_B, '10:00', '14:00');
+    // Square can return a shift whose wage carries no job_id (legacy or
+    // unassigned positions) — attendance still counts.
+    jobless.wage = { hourly_rate: { amount: 1800, currency: 'USD' } } as never;
+    setMockWorked(() => ({ shifts: [jobless] }));
+
+    const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
+    expect(lunch.staffed.map(p => p.name)).toEqual(['Sam Grills']);
+    expect(lunch.staffed[0].suggestedRole).toBe('KITCHEN');
+    expect(lunch.staffed[0].scheduledJobTitle).toBeNull();
+  });
+
+  it('excludes a role-mapped manager who clocked in', async () => {
+    setMockWorked(() => ({ shifts: [
+      workedAt('W4', fixtures.TM_MANAGER_X, '15:00', '21:00', { title: 'Manager', jobId: 'JOB-manager' }),
+    ]}));
+
+    // The manager is the only person who clocked in — clock-in data is
+    // still the source of truth, so the schedule must NOT paper over it.
+    const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
+    expect(dinner.source).toBe('square_clocked_in');
+    expect(dinner.staffed).toEqual([]);
+    expect(dinner.excluded).toEqual([
+      { name: 'Alex Leads', scheduledJobTitle: 'Manager' },
+    ]);
+  });
+
+  it('drops clock-ins with no minutes inside the window (day-grazing shifts)', async () => {
+    // Pat clocked in 17:00–23:00; the day-range search (INTERSECTION) still
+    // returns it for a lunch query — it must not staff Lunch.
+    setMockWorked(() => ({ shifts: [
+      workedAt('W5', fixtures.TM_BARKEEP, '17:00', '23:00', { title: 'Bartender', jobId: 'JOB-bartender' }),
+    ]}));
+
+    const lunch = await staffing.getShiftStaffing(BD, 'Lunch');
+    expect(lunch.source).toBe('square_clocked_in');
+    expect(lunch.staffed).toEqual([]);
+    expect(lunch.notInRoster).toEqual([]);
 
     const dinner = await staffing.getShiftStaffing(BD, 'Dinner');
     expect(dinner.staffed.map(p => p.name)).toEqual(['Pat Mixwell']);

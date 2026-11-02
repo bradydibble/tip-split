@@ -23,13 +23,13 @@
   let staffEffectiveRoles = $state<Map<number, StaffRole>>(new Map());
 
   // ── Square staffing defaults ────────────────────────────────────────────
-  // When a Square schedule is linked, the list defaults to the people
-  // scheduled for the selected date + shift. Anyone can still be removed
-  // (missed work) or added (covers) — this only sets the default view and
-  // the default selection.
+  // When a Square schedule is linked, the list defaults to the people who
+  // clocked in for the selected date + shift (falls back to the published
+  // schedule pre-service). Anyone can still be removed (missed work) or
+  // added (covers) — this only sets the default view and selection.
 
   type StaffingSource =
-    | 'shift_report' | 'square_live' | 'not_configured'
+    | 'shift_report' | 'square_clocked_in' | 'square_live' | 'not_configured'
     | 'no_location' | 'no_schedule' | 'error';
 
   type StaffingInfo = {
@@ -318,14 +318,19 @@
       </div>
 
       {#if staffing.loading}
-        <p class="staffing-note" role="status">Checking the Square schedule…</p>
+        <p class="staffing-note" role="status">Checking Square clock-ins…</p>
       {:else if staffingActive}
         <p class="staffing-note">
-          Showing {staffing.staffedIds.size} scheduled for this shift from the
-          {staffing.source === 'shift_report' ? 'reviewed shift report' : 'Square schedule'}.
+          Showing {staffing.staffedIds.size} {staffing.source === 'square_clocked_in'
+            ? 'who clocked in'
+            : 'scheduled'} for this shift from the
+          {staffing.source === 'shift_report' ? 'reviewed shift report'
+            : staffing.source === 'square_clocked_in' ? 'Square clock-ins'
+            : 'Square schedule'}.
           Uncheck anyone who missed work{showFullRoster ? '' : ', or open the full roster to add covers'}.
           {#if staffing.notInRosterCount > 0}
-            {staffing.notInRosterCount} scheduled {staffing.notInRosterCount === 1 ? 'person is' : 'people are'}
+            {staffing.notInRosterCount} {staffing.source === 'square_clocked_in' ? 'who clocked in' : 'scheduled'}
+            {staffing.notInRosterCount === 1 ? 'is' : 'are'}
             not in the roster yet — add {staffing.notInRosterCount === 1 ? 'them' : 'anyone who worked'} below.
           {/if}
         </p>
