@@ -129,12 +129,20 @@ const busserStaff  = staff.filter(s => s.role === 'Busser');
   // sales) → kitchen pool (kitchenPct × the remainder AFTER the bar
   // deduction) → FOH pool (remainder − kitchen − busser cut). The bar
   // portion comes out BEFORE the kitchen split.
+  // Empty roles get nothing: a pool with nobody in it would otherwise hold
+  // money no one can be paid (seen live: $15 stranded in an unpaid kitchen
+  // pool). The percentage applies only when that role has staff; otherwise
+  // the share stays with the remaining pools.
   // Net returns can drive liquor sales below zero (returns exceed sales).
   // A negative bar pool would inflate the FOH pool by that amount; clamp at
   // zero and let the display show the negative liquor figure for audit.
-  const barPoolCents             = Math.max(0, toDollars(Math.round(liquorSalesCents * config.barLiquorPct)));
+  const barPoolCents             = barStaff.length > 0
+    ? Math.max(0, toDollars(Math.round(liquorSalesCents * config.barLiquorPct)))
+    : 0;
   const remainingAfterBarCents   = tipsAfterFeesCents - barPoolCents;
-  const kitchenPoolCents         = toDollars(Math.round(remainingAfterBarCents * config.kitchenPct));
+  const kitchenPoolCents         = kitchenStaff.length > 0
+    ? toDollars(Math.round(remainingAfterBarCents * config.kitchenPct))
+    : 0;
   const busserPoolCents          = busserRateCents * busserStaff.length;
   const fohPoolCents             = remainingAfterBarCents - kitchenPoolCents - busserPoolCents;
 
