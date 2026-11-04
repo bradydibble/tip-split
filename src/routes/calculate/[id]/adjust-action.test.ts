@@ -173,3 +173,122 @@ describe('adjust action permissions', () => {
     expect(result.status).toBe(401);
   });
 });
+
+// ── FOH/Bar share one redistribution pool ─────────────────────────────────────
+// FOH and Bar draw from the SAME FOH pool (bar staff just get a bar top-up
+// on top). Adjusting either role must redistribute across BOTH roles, not
+// just the target's own role.
+
+describe('adjust action — FOH and Bar redistribute together', () => {
+  /** One calc: 1 FOH ($3000), 1 Bar ($2000 FOH share + $1000 bar top-up), 1 Kitchen ($970). */
+  function seedFohBar(): { calcId: number; fohId: number; barId: number; kitId: number } {
+    const codeF = `TS-7F${String(++seedCounter).padStart(3, '0')}`;
+    const codeB = `TS-7B${String(seedCounter).padStart(3, '0')}`;
+    const codeK = `TS-7K${String(seedCounter).padStart(3, '0')}`;
+
+    const calcId = Number(db.prepare(`
+      INSERT INTO tip_calculations
+        (date, shift, gross_tips_cents, liquor_sales_cents, cc_fee_rate, kitchen_pct,
+         bar_liquor_pct, cc_fees_cents, tips_after_fees_cents, kitchen_pool_cents,
+         bar_pool_cents, busser_pool_cents, foh_pool_cents)
+      VALUES ('2026-09-02', 'Dinner', 12000, 10000, 0.03, 0.10, 0.10, 360, 11640, 970, 1000, 0, 5000)
+    `).run().lastInsertRowid);
+
+    const fohId = Number(db.prepare(
+      "INSERT INTO staff (name, role, staff_code) VALUES ('Foxy Test', 'FOH', ?)"
+    ).run(codeF).lastInsertRowid);
+    const barId = Number(db.prepare(
+      "INSERT INTO staff (name, role, staff_code) VALUES ('Baz Test', 'Bar', ?)"
+    ).run(codeB).lastInsertRowid);
+    const kitId = Number(db.prepare(
+      "INSERT INTO staff (name, role, staff_code) VALUES ('Kik Test', 'Kitchen', ?)"
+    ).run(codeK).lastInsertRowid);
+
+    const ins = db.prepare(`
+      INSERT INTO tip_distributions
+        (calculation_id, staff_id, name, role, foh_share_cents, bar_pool_share_cents, kitchen_share_cents, total_cents)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    ins.run(calcId, fohId, 'Foxy Test', 'FOH', 2500, 0, 0, 2500);
+    ins.run(calcId, barId, 'Baz Test', 'Bar', 2500, 1000, 0, 3500);
+    ins.run(calcId, kitId, 'Kik Test', 'Kitchen', 0, 0, 970, 970);
+
+    return { calcId, fohId, barId, kitId };
+  }
+
+  async function adjust(calcId: number, staffId: number, pct: number) {
+    const fd = new FormData();
+    fd.set('staffId', String(staffId));
+    fd.set('adjustment', String(pct));
+    fd.set('reason', 'test');
+    try {
+      await page.actions.adjust!({
+        request: new Request(`http://localhost/calculate/${calcId}?/adjust`, { method: 'POST', body: fd }),
+        locals: { user: { id: 1, role: 'manager' }, sessionId: null },
+        params: { id: String(calcId) },
+      } as Parameters<typeof page.actions.adjust>[0]);
+    } catch {
+      // redirect(303) throws — the adjustment committed
+    }
+  }
+
+  const totals = (calcId: number) => {
+    const rows = db.prepare(
+      'SELECT staff_id, total_cents FROM tip_distributions WHERE calculation_id = ?'
+    ).all(calcId) as { staff_id: number; total_cents: number }[];
+    return Object.fromEntries(rows.map(r => [r.staff_id, r.total_cents]));
+  };
+
+  it('adjusting a Bar person redistributes to FOH too', async () => {
+    const { calcId, fohId, barId } = seedFohBar();
+    await adjust(calcId, barId, -20); // Baz 3500 → 2800, withhold 700
+
+    const t = totals(calcId);
+    expect(t[barId]).toBe(2800);
+    expect(t[fohId]).toBe(2500 + 700); // FOH gets the whole cut
+  });
+
+  it('adjusting a FOH person redistributes to Bar too', async () => {
+    const { calcId, fohId, barId } = seedFohBar();
+    await adjust(calcId, fohId, -50); // Foxy 2500 → 1250, withhold 1250
+
+    const t = totals(calcId);
+    expect(t[fohId]).toBe(1250);
+    expect(t[barId]).toBe(3500 + 1250); // Bar person gets the whole cut
+  });
+
+  it('splits the cut proportionally across both roles', async () => {
+    const { calcId, fohId, barId, kitId } = seedFohBar();
+    // Add a second FOH so the cut splits 3 ways within the FOH side.
+    const codeF2 = `TS-7F2${String(seedCounter).padStart(3, '0')}`;
+    const foh2Id = Number(db.prepare(
+      "INSERT INTO staff (name, role, staff_code) VALUES ('Foxi Test', 'FOH', ?)"
+    ).run(codeF2).lastInsertRowid);
+    db.prepare(`
+      INSERT INTO tip_distributions (calculation_id, staff_id, name, role, foh_share_cents, total_cents)
+      VALUES (?, ?, 'Foxi Test', 'FOH', 2500, 2500)
+    `).run(calcId, foh2Id);
+
+    await adjust(calcId, barId, -10); // Baz 3500 → 3150, withhold 350
+    const t = totals(calcId);
+    expect(t[barId]).toBe(3150);
+    // 350 split between the two FOH, proportional to their $2500 each → $175 each
+    expect(t[fohId]).toBe(2675);
+    expect(t[foh2Id]).toBe(2675);
+    // Kitchen untouched — not on the FOH side.
+    expect(t[kitId]).toBe(970);
+  });
+
+  it('kitchen adjustments stay kitchen-scoped', async () => {
+    const { calcId, kitId, fohId, barId } = seedFohBar();
+    await adjust(calcId, kitId, -100); // Kik 970 → 0
+
+    const t = totals(calcId);
+    expect(t[kitId]).toBe(0);
+    // Kitchen is solo in this seed: its cut falls back to everyone else
+    // with money (FOH + Bar), proportional to their totals.
+    // Pool = 2500 + 3500 = 6000. FOH: 2500/6000 × 970 ≈ 404; Bar: 566 (last absorbs residual).
+    expect(t[fohId]).toBe(2904);
+    expect(t[barId]).toBe(3500 + 566);
+  });
+});

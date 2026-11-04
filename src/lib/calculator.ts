@@ -136,15 +136,23 @@ const busserStaff  = staff.filter(s => s.role === 'Busser');
   // Net returns can drive liquor sales below zero (returns exceed sales).
   // A negative bar pool would inflate the FOH pool by that amount; clamp at
   // zero and let the display show the negative liquor figure for audit.
-  const barPoolCents             = barStaff.length > 0
+  const barPoolCents             = barStaff.length > 0 && tipsAfterFeesCents > 0
     ? Math.max(0, toDollars(Math.round(liquorSalesCents * config.barLiquorPct)))
     : 0;
   const remainingAfterBarCents   = tipsAfterFeesCents - barPoolCents;
-  const kitchenPoolCents         = kitchenStaff.length > 0
-    ? toDollars(Math.round(remainingAfterBarCents * config.kitchenPct))
+  const kitchenPoolCents         = kitchenStaff.length > 0 && remainingAfterBarCents > 0
+    ? Math.min(
+        remainingAfterBarCents,
+        toDollars(Math.round(remainingAfterBarCents * config.kitchenPct))
+      )
     : 0;
   const busserPoolCents          = busserRateCents * busserStaff.length;
-  const fohPoolCents             = remainingAfterBarCents - kitchenPoolCents - busserPoolCents;
+  // Claims can exceed the money available (net returns, big liquor %,
+  // zero-tip nights). Payouts floor at zero: bar/kitchen take their share
+  // first, bussers their fixed rate, and the FOH pool — the residual —
+  // floors at zero rather than writing negative checks. The shortfall is
+  // visible in the pool breakdown for audit.
+  const fohPoolCents             = Math.max(0, remainingAfterBarCents - kitchenPoolCents - busserPoolCents);
 
   // Bar staff participate in the FOH pool split alongside FOH staff
   const fohPoolParticipants = [...fohStaff, ...barStaff];
