@@ -105,7 +105,7 @@ const submitAdjustment = () => {
 
 <div class="page" style="padding-top:0;">
   <nav class="nav">
-    <a href="/calculate" class="nav-back" aria-label="Back">←</a>
+    <a href="/history" class="nav-back" aria-label="Back to history">←</a>
     <h2>{c.date} · {c.shift}</h2>
     <a href="/calculate/{c.id}/share" style="font-size:0.875rem;font-weight:600;">Share</a>
   </nav>
