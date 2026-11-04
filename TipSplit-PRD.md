@@ -41,7 +41,7 @@ Tips are calculated per shift (Lunch and Dinner are independent). The cutoff bet
 | 2. Tips After Fees | Gross Tips − CC Fees | |
 | 3. Bar Pool | Liquor Sales × Bar % (default 10%) | Deducted before the kitchen/FOH split |
 | 4. After Bar | Tips After Fees − Bar Pool | |
-| 5. Kitchen Pool | Tips After Fees × Kitchen % (default 5%) | Base is Tips After Fees; bar deduction does not change it |
+| 5. Kitchen Pool | Tips After Bar × Kitchen % (default 5%) | Base is the remainder after the bar deduction |
 | 6. FOH Pool | After Bar − Kitchen Pool − Busser Pool | |
 | 7. Busser Pool | Busser rate × number of bussers | Fixed per-person cut from the FOH side |
 | 8. FOH Split | FOH Pool ÷ number of FOH staff | Bartenders excluded from FOH pool |
@@ -57,7 +57,7 @@ Tips are calculated per shift (Lunch and Dinner are independent). The cutoff bet
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | CC Fee Rate | 2.5% | Deducted from gross tips |
-| Kitchen Split % | 5% | Portion of tips after fees to kitchen |
+| Kitchen Split % | 5% | Portion of tips after the bar deduction to kitchen |
 | Bar Liquor % | 10% | Portion of liquor sales to bar pool |
 | Lunch Cutoff | 15:00 Pacific | Determines Lunch vs Dinner shift |
 
@@ -93,7 +93,7 @@ Tips are calculated per shift (Lunch and Dinner are independent). The cutoff bet
 | ID | Requirement | Priority | Phase |
 |----|-------------|----------|-------|
 | TS-1 | Apply configurable CC fee % to gross tips | P0 | 1 ✅ |
-| TS-2 | Calculate kitchen pool as configurable % of tips after fees | P0 | 1 ✅ |
+| TS-2 | Calculate kitchen pool as configurable % of tips after the bar deduction | P0 | 1 ✅ |
 | TS-3 | Calculate bar pool as configurable % of liquor sales | P0 | 1 ✅ |
 | TS-4 | Calculate FOH pool as remaining after kitchen and bar deductions | P0 | 1 ✅ |
 | TS-5 | Split FOH pool equally among FOH staff only (bartenders excluded) | P0 | 1 ✅ |

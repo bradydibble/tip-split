@@ -47,13 +47,13 @@ describe('calculate — intermediate amounts', () => {
     expect(r.remainingAfterBarCents).toBe(96500 - 9650); // $868.50
   });
 
-  it('kitchenPool = $965 × 5% = $48.25 (base is tips after fees; bar does not change it)', () => {
-    expect(r.kitchenPoolCents).toBe(4825);
-    expect(r.fohPoolCents).toBe(86850 - 4825); // $820.25
+  it('kitchenPool = 5% of the after-bar remainder ($868.50) = $43.43 — bar comes out first', () => {
+    expect(r.kitchenPoolCents).toBe(4343);
+    expect(r.fohPoolCents).toBe(86850 - 4343); // $820.25 → now $825.07
   });
 
-  it('fohPool = $916.75 − $96.50 = $820.25', () => {
-    expect(r.fohPoolCents).toBe(82025);
+  it('fohPool = $868.50 − $43.43 = $825.07', () => {
+    expect(r.fohPoolCents).toBe(82507);
   });
 
   it('bartender IS counted in FOH pool participants', () => {
@@ -73,28 +73,29 @@ describe('calculate — roundToDollar: false', () => {
   const bar     = r.distributions.filter(d => d.role === 'Bar');
   const kitchen = r.distributions.filter(d => d.role === 'Kitchen');
 
-  it('5 FOH servers split $820.25 among 6 (FOH+Bar) → floor $136.70, 5¢ remainder to first 5', () => {
-    // fohPool = 82025 cents, 6 participants: floor(82025/6) = 13670, remainder = 82025 - 13670*6 = 5
-    // fohPoolParticipants = [...fohStaff, ...barStaff], so first 5 (all FOH) each get 13671¢
+  it('5 FOH servers split $825.07 among 6 (FOH+Bar) → floor $137.51, 1¢ remainder to first', () => {
+    // fohPool = 82507 cents, 6 participants: floor(82507/6) = 13751, remainder = 82507 - 13751*6 = 1
+    // fohPoolParticipants = [...fohStaff, ...barStaff], so the first FOH gets 13752¢
     expect(foh).toHaveLength(5);
-    foh.forEach(d => {
-      expect(d.totalCents).toBe(13671);
+    expect(foh[0].totalCents).toBe(13752);
+    foh.slice(1).forEach(d => {
+      expect(d.totalCents).toBe(13751);
     });
   });
 
-  it('bartender gets FOH share + bar pool share: FOH $136.70 + bar $96.50', () => {
+  it('bartender gets FOH share + bar pool share: FOH $137.51 + bar $96.50', () => {
     expect(bar).toHaveLength(1);
-    // bartender is the 6th participant (index 5) — gets 13670¢ FOH share + 9650¢ bar pool
-    expect(bar[0].fohShareCents).toBe(13670);
+    // bartender is the 6th participant (index 5) — gets 13751¢ FOH share + 9650¢ bar pool
+    expect(bar[0].fohShareCents).toBe(13751);
     expect(bar[0].barPoolShareCents).toBe(9650);
-    expect(bar[0].totalCents).toBe(13670 + 9650);
+    expect(bar[0].totalCents).toBe(13751 + 9650);
   });
 
-  it('3 kitchen cooks split $48.25 → $16.09, $16.08, $16.08 (1¢ remainder to first)', () => {
+  it('3 kitchen cooks split $43.43 → $14.48, $14.48, $14.47 (1¢ remainder to first two)', () => {
     expect(kitchen).toHaveLength(3);
-    expect(kitchen[0].totalCents).toBe(1609); // $16.09 — gets remainder cent
-    expect(kitchen[1].totalCents).toBe(1608); // $16.08
-    expect(kitchen[2].totalCents).toBe(1608); // $16.08
+    expect(kitchen[0].totalCents).toBe(1448); // $14.48 — gets remainder cent
+    expect(kitchen[1].totalCents).toBe(1448); // $14.48
+    expect(kitchen[2].totalCents).toBe(1447); // $14.47
   });
 
   it('kitchen distribution sums to kitchenPoolCents', () => {
@@ -115,38 +116,38 @@ describe('calculate — roundToDollar: true (default)', () => {
     r.distributions.forEach(d => expect(d.totalCents % 100).toBe(0));
   });
 
-  it('FOH pool rounds to $820, split 6 ways (5 FOH + 1 Bar) → base $136, 4 extras of $137', () => {
-    // kitchenPool: round(4825/100)*100 = 4800; remaining = 96500-4800 = 91700
-    // barPool: round(9650/100)*100 = 9700; fohPool = 91700-9700 = 82000 → $820
-    // 820 / 6 = 136 base, extras = 820 - 136*6 = 820 - 816 = 4
+  it('FOH pool rounds to $825, split 6 ways (5 FOH + 1 Bar) → base $137, 3 extras of $138', () => {
+    // kitchenPool: 5% of after-bar 86850 = 4343 → round(4343/100)*100 = 4300
+    // fohPool = 86850 - 4300 = 82550 → distributes as $825 across people
+    // 825 / 6 = 137 base, extras = 825 - 137*6 = 3
     expect(foh).toHaveLength(5);
     const fohTotals = foh.map(d => d.totalCents);
-    fohTotals.forEach(t => expect(t === 13600 || t === 13700).toBe(true));
+    fohTotals.forEach(t => expect(t === 13700 || t === 13800).toBe(true));
     const fohSum = fohTotals.reduce((s, t) => s + t, 0);
-    // all 5 FOH + 1 bar share $820 pool; check FOH portion is consistent
+    // all 5 FOH + 1 bar share the pool; check FOH portion is consistent
     expect(fohSum % 100).toBe(0);
   });
 
   it('bar pool rounds to $97, bartender gets FOH share + $97 bar', () => {
     // Math.round(9650 / 100) = 97
     expect(bar[0].barPoolShareCents).toBe(9700);
-    expect(bar[0].fohShareCents === 13600 || bar[0].fohShareCents === 13700).toBe(true);
+    expect(bar[0].fohShareCents === 13700 || bar[0].fohShareCents === 13800).toBe(true);
     expect(bar[0].totalCents).toBe(bar[0].fohShareCents + 9700);
   });
 
-  it('FOH + Bar pool shares sum to $820', () => {
+  it('FOH + Bar pool shares sum to $825', () => {
     const allFohShares = [...foh, ...bar].reduce((s, d) => s + d.fohShareCents, 0);
-    expect(allFohShares).toBe(82000);
+    expect(allFohShares).toBe(82500);
   });
 
-  it('kitchen pool rounds to $48, 3 cooks → $16 each (exact)', () => {
-    // Math.round(4825 / 100) = 48 (rounds 48.25 → 48), 48 / 3 = 16 exact
-    kitchen.forEach(d => expect(d.totalCents).toBe(1600));
+  it('kitchen pool rounds to $43, 3 cooks → random whole dollars summing to $43', () => {
+    // Math.round(4343 / 100) = 43; remainder dollars go to random cooks
+    kitchen.forEach(d => expect(d.totalCents === 1400 || d.totalCents === 1500).toBe(true));
   });
 
-  it('kitchen total = $48', () => {
+  it('kitchen total = $43', () => {
     const sum = kitchen.reduce((s, d) => s + d.totalCents, 0);
-    expect(sum).toBe(4800);
+    expect(sum).toBe(4300);
   });
 });
 
@@ -196,6 +197,7 @@ describe('calculate — negative liquor sales', () => {
     expect(r.barPoolCents).toBe(0);
     // FOH pool is NOT inflated by the negative bar amount:
     expect(r.remainingAfterBarCents).toBe(96500);
+    // Bar clamped at zero → kitchen base is the full tips after fees
     expect(r.fohPoolCents).toBe(96500 - 4825);
   });
 
@@ -239,11 +241,11 @@ describe('calculate — bussers', () => {
     });
   });
 
-  it('bar deducted before the split; busser cut comes from the FOH side', () => {
+  it('bar deducted before the kitchen split; busser cut comes from the FOH side', () => {
     expect(r.barPoolCents).toBe(9650);                      // 10% of $965 liquor
     expect(r.remainingAfterBarCents).toBe(96500 - 9650);    // $868.50
-    expect(r.kitchenPoolCents).toBe(4825);                  // unchanged: 5% of tips after fees
-    expect(r.fohPoolCents).toBe(86850 - 4825 - 4000);       // $780.25 (was $820.25 w/o bussers)
+    expect(r.kitchenPoolCents).toBe(4343);                  // 5% of the after-bar remainder
+    expect(r.fohPoolCents).toBe(86850 - 4343 - 4000);       // $785.07
   });
 
   it('bussers do NOT participate in the FOH pool', () => {
@@ -264,7 +266,7 @@ describe('calculate — bussers', () => {
     const rNo = calculate({ ...BASE_INPUT, config: { ...BASE_INPUT.config, roundToDollar: false } });
     expect(rNo.busserStaffCount).toBe(0);
     expect(rNo.busserPoolCents).toBe(0);
-    expect(rNo.fohPoolCents).toBe(82025); // unchanged from pre-busser behavior
+    expect(rNo.fohPoolCents).toBe(82507); // unchanged from pre-busser behavior
   });
 
   it('roundToDollar mode: bussers still get exact whole-dollar rate', () => {

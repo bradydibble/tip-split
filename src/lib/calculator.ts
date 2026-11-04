@@ -98,8 +98,8 @@ function distributePoolCents(poolCents: number, count: number): number[] {
  *   Busser staff  → fixed per-person cut from the FOH side
  *
  * Order of operations: Tip → CC fee → Bar pool (barLiquorPct × liquor
- * sales) → kitchen pool (kitchenPct × tips-after-fees) and FOH pool
- * (remainder − busser cut) → per-person splits.
+ * sales) → kitchen pool (kitchenPct × remainder after bar) and FOH pool
+ * (remainder − kitchen − busser cut) → per-person splits.
  *
  * When roundToDollar is true, every computed amount (CC fees, each pool) is
  * rounded to the nearest whole dollar before use, so all displayed values and
@@ -125,16 +125,16 @@ const kitchenStaff = staff.filter(s => s.role === 'Kitchen');
 const barStaff     = staff.filter(s => s.role === 'Bar');
 const busserStaff  = staff.filter(s => s.role === 'Busser');
 
-  // Order of operations: Tip → CC fee → Bar pool (barLiquorPct × liquor sales)
-  // → 50/50-style split of the remainder into kitchen and FOH pools →
-  // busser fixed cut from the FOH side. Kitchen % applies to tips after
-  // fees (the bar deduction does not change its base).
+  // Order of operations: Tip → CC fee → Bar pool (barLiquorPct × liquor
+  // sales) → kitchen pool (kitchenPct × the remainder AFTER the bar
+  // deduction) → FOH pool (remainder − kitchen − busser cut). The bar
+  // portion comes out BEFORE the kitchen split.
   // Net returns can drive liquor sales below zero (returns exceed sales).
   // A negative bar pool would inflate the FOH pool by that amount; clamp at
   // zero and let the display show the negative liquor figure for audit.
   const barPoolCents             = Math.max(0, toDollars(Math.round(liquorSalesCents * config.barLiquorPct)));
   const remainingAfterBarCents   = tipsAfterFeesCents - barPoolCents;
-  const kitchenPoolCents         = toDollars(Math.round(tipsAfterFeesCents * config.kitchenPct));
+  const kitchenPoolCents         = toDollars(Math.round(remainingAfterBarCents * config.kitchenPct));
   const busserPoolCents          = busserRateCents * busserStaff.length;
   const fohPoolCents             = remainingAfterBarCents - kitchenPoolCents - busserPoolCents;
 
