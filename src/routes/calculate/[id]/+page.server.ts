@@ -95,11 +95,20 @@ export const actions: Actions = {
     const withheld = baseTotal - adjustedTotal;
     if (withheld === 0) return fail(400, { error: 'Zero adjustment' });
 
-    // Pool = others in the SAME role for this shift. If solo, redistribute
-    // downstream to everyone else (proportional to their current totals).
+    // Pool = the FOH-side pool (FOH + Bar share one pool; bar staff take a
+    // bar-pool top-up on top). Adjusting either a FOH or Bar person
+    // redistributes across BOTH roles — their money comes from the same
+    // FOH pool, so the cut returns to the same people who shared it.
+    // Other roles (Kitchen, Busser) stay role-scoped.
     const targetRole = targetDist.role;
-    let pool = dists.filter(d => d.staff_id !== staffId && d.role === targetRole);
-    if (pool.length === 0) pool = dists.filter(d => d.staff_id !== staffId);
+    const fohSideRoles = new Set(['FOH', 'Bar']);
+    let pool = dists.filter(d =>
+      d.staff_id !== staffId &&
+      (fohSideRoles.has(targetRole) ? fohSideRoles.has(d.role) : d.role === targetRole)
+    );
+    // Solo on the FOH side (or a role with no other members): fall back to
+    // everyone else with money, so the redistribution still has a destination.
+    if (pool.length === 0) pool = dists.filter(d => d.staff_id !== staffId && d.total_cents > 0);
     if (pool.length === 0) return fail(400, { error: 'No other staff to redistribute to' });
     const poolTotal = pool.reduce((s, d) => s + d.total_cents, 0);
     if (poolTotal === 0) return fail(400, { error: 'Recipients have zero pool' });
